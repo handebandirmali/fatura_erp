@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime, date
 
 def render_sidebar():
-    st.markdown("### 🔍 Filtreleme Paneli")
     
     # Filtreleri 5 sütuna yayıyoruz
     col0, col1, col2, col3, col4 = st.columns(5)

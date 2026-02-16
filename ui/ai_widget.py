@@ -19,14 +19,14 @@ def render_ai_widget(subset_df):
     <style>
     /* 1. YUVARLAK FLOATING BUTON */
     div[data-testid="stPopover"] > div > button {
-        width: 60px; 
-        height: 60px; 
-        border-radius: 50%; 
+        width: 70px; 
+        height: 70px; 
+        border-radius: 60%; 
         background: linear-gradient(135deg, #FF4B4B, #FF9068);
         color: white; 
         box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         border: none;
-        font-size: 28px;
+        font-size: 38px;
         transition: transform 0.2s;
         z-index: 9999;
     }
@@ -36,9 +36,13 @@ def render_ai_widget(subset_df):
 
     /* 2. POPOVER PENCERE DÜZENİ */
     div[data-testid="stPopoverBody"] {
-        padding: 0 !important; /* Kenar boşluklarını sıfırla */
-        background-color: #f9f9f9; /* Sohbet arka planı */
-    }
+    padding: 0 !important;
+    background-color: #f0f2f6;
+    width: 420px !important;      /* SABİT GENİŞLİK BURASI */
+    max-width: 90vw !important;
+    border-radius: 12px !important;
+    border: 1px solid #ddd !important;
+}
 
     /* 3. SOHBET BALONCUKLARI (Chat Bubbles) */
     .chat-container {
@@ -89,6 +93,8 @@ def render_ai_widget(subset_df):
         /* Mevcut CSS içine ekle */
     .chat-container {
         scroll-behavior: smooth;
+        overflow-y: auto;
+        height: 100%;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -154,7 +160,14 @@ def render_ai_widget(subset_df):
                 with chat_box:
                     with st.spinner("GıtGıt yazıyor..."):
                         try:
-                            response_text = run_ai(prompt, subset_df, st.session_state.chat_history)
+                            response_placeholder = st.empty()
+
+                            response_text = run_ai(
+                                prompt,
+                                subset_df,
+                                st.session_state.chat_history,
+                                response_placeholder
+                            )
                         except Exception as e:
                             response_text = f"Hata: {str(e)}"
                 

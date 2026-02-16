@@ -2,49 +2,49 @@ import pandas as pd
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from langchain.callbacks.base import BaseCallbackHandler
+from typing import Any
 
-def run_ai(prompt: str, subset_df, chat_history):
+class StreamlitHandler(BaseCallbackHandler):
+    def __init__(self, placeholder):
+        self.placeholder = placeholder
+        self.final_text = ""
+
+    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+        self.final_text += token
+
+        bubble_html = f"""
+        <div class="chat-container">
+            <div class="bubble bot-bubble">
+                🐔 {self.final_text}
+            </div>
+        </div>
+        """
+
+        self.placeholder.markdown(bubble_html, unsafe_allow_html=True)
+
+        
+def run_ai(prompt: str, subset_df, chat_history, placeholder):
 
     clean_df = subset_df.copy()
+    context_table = clean_df.drop(columns=['xml_ubl'], errors='ignore').head(15).to_string(index=False)
 
-    if 'Toplam' in clean_df.columns:
-        clean_df['Toplam'] = (
-            clean_df['Toplam'].astype(str)
-            .str.replace('.', '', regex=False)
-            .str.replace(',', '.', regex=False)
-            .str.replace(r'[^\d.]', '', regex=True)
-        )
-        clean_df['Toplam'] = pd.to_numeric(clean_df['Toplam'], errors='coerce').fillna(0)
+    if clean_df.empty:
+        placeholder.markdown("Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı.")
+        return "Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı."
 
-    fatura_sayisi = len(clean_df)
-    toplam_val = clean_df['Toplam'].sum()
-    toplam_str = "{:,.2f} TL".format(toplam_val).replace(",", "X").replace(".", ",").replace("X", ".")
+    system_content = f"Sen bir ERP uzmanısın. Tabloya göre cevap ver.\n\nTablo:\n{context_table}"
 
-    context_table = clean_df.drop(columns=['xml_ubl'], errors='ignore').head(15).to_string(
-        index=False,
-        float_format=lambda x: "{:.2f}".format(x)
-    )
+    messages = [SystemMessage(content=system_content)] + chat_history + [HumanMessage(content=prompt)]
+
+    stream_handler = StreamlitHandler(placeholder)
 
     llm = ChatOllama(
         model="llama3.2:3b",
-        temperature=0
+        temperature=0,
+        streaming=True,
+        callbacks=[stream_handler]
     )
-    if clean_df.empty:
-            return "Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı."
-    system_content = f"""
-Sen bir ERP uzmanısın.
-Hızlı cevap ver.
-Hesaplama yapma.
-Toplam sorulursa aşağıdaki toplamı kullan.
-
-Fatura Sayısı: {fatura_sayisi}
-Toplam Tutar: {toplam_str}
-
-Tablo:
-{context_table}
-"""
-
-    messages = [SystemMessage(content=system_content)] + chat_history + [HumanMessage(content=prompt)]
 
     response = llm.invoke(messages)
 

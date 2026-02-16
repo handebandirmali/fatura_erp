@@ -117,19 +117,11 @@ def render_fatura_page():
                     st.session_state.edit_mode = False
                     st.rerun()
 
-           # ... (üst kısımlar aynı)
             with col_save:
                 if st.form_submit_button("💾 DEĞİŞİKLİKLERİ KAYDET", type="primary"):
                     try:
                         cur = conn.cursor()
-                        
-                        # 1. ÖNCE VERİTABANINDAKİ MEVCUT XML'İ TAZE OLARAK ÇEKİN
-                        # edit_df içindeki bayat veriyi kullanmak yerine güncel XML'i alıyoruz
-                        cur.execute("SELECT TOP 1 xml_ubl FROM FaturaDetay WHERE fatura_no=?", (selected_fatura_no,))
-                        row = cur.fetchone()
-                        current_xml = row[0] if row else None
 
-                        # 2. SATIR BAZLI GÜNCELLEMELERİ YAPIN
                         for u in updates:
                             cur.execute("""
                             UPDATE FaturaDetay SET
@@ -138,13 +130,10 @@ def render_fatura_page():
                             WHERE fatura_no=? AND stok_kod=?
                             """, u)
 
-                        # 3. XML GÜNCELLEME VE KAYDETME
-                        if current_xml:
-                            # updates listesini kullanarak XML'i hafızada güncelleyin
-                            new_xml = update_invoice_xml(current_xml, updates)
-                            
-                            # Güncellenmiş XML'i o faturaya ait TÜM satırlara basın 
-                            # (Çünkü her satırda aynı XML tutuluyor gibi görünüyor)
+                        old_xml = edit_df.iloc[0]["xml_ubl"]
+
+                        if old_xml:
+                            new_xml = update_invoice_xml(old_xml, updates)
                             cur.execute(
                                 "UPDATE FaturaDetay SET xml_ubl=? WHERE fatura_no=?",
                                 (new_xml, selected_fatura_no)
@@ -152,10 +141,9 @@ def render_fatura_page():
 
                         conn.commit()
 
-                        st.success("✅ Fatura ve XML başarıyla güncellendi!")
+                        st.success("✅ Fatura başarıyla güncellendi!")
                         st.session_state.edit_mode = False
                         st.rerun()
-# ...
 
                     except Exception as e:
                         st.error(f"Hata oluştu: {str(e)}")

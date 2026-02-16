@@ -5,14 +5,6 @@ import webbrowser
 def render_invoice_html(xml_string):
     tree = ET.fromstring(xml_string.encode("utf-8"))
 
-    # Logoların bilgisayarındaki yolları
-    gedik_logo_path = r"C:\Users\Hande\Pictures\Screenshots\Ekran görüntüsü 2026-02-16 161247.png"
-    gib_logo_path = r"C:\Users\Hande\Pictures\Screenshots\Ekran görüntüsü 2026-02-16 155657.png"
-    
-    # URL formatına dönüştürme (Boşluklar ve Türkçe karakterler için)
-    gedik_url = "file:///" + gedik_logo_path.replace("\\", "/")
-    gib_url = "file:///" + gib_logo_path.replace("\\", "/")
-
     xslt_str = f"""<?xml version="1.0" encoding="UTF-8"?>
 <xsl:stylesheet version="1.0"
     xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
@@ -31,12 +23,7 @@ def render_invoice_html(xml_string):
     
     /* Header Yapısı */
     .header-table {{ width: 100%; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; }}
-    .logo-left {{ width: 40%; text-align: left; vertical-align: middle; }}
-    .title-center {{ width: 20%; text-align: center; vertical-align: middle; font-weight: bold; font-size: 20px; }}
-    .logo-right {{ width: 40%; text-align: right; vertical-align: middle; }}
-    
-    .main-logo {{ max-width: 220px; height: auto; }}
-    .gib-logo {{ max-width: 120px; height: auto; }}
+    .title-center {{ text-align: center; font-weight: bold; font-size: 24px; padding: 20px 0; }}
     
     /* Müşteri ve Bilgi Alanı */
     .info-row {{ width: 100%; margin-top: 15px; }}
@@ -67,13 +54,7 @@ def render_invoice_html(xml_string):
 <div class="container">
     <table class="header-table">
         <tr>
-            <td class="logo-left">
-                <img src="{gedik_url}" class="main-logo" alt="Gedik Piliç"/>
-            </td>
             <td class="title-center">e-Arşiv Fatura</td>
-            <td class="logo-right">
-                <img src="{gib_url}" class="gib-logo" alt="GİB Logo"/>
-            </td>
         </tr>
     </table>
 

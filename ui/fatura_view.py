@@ -8,17 +8,12 @@ from services.invoice_calc import update_invoice_xml
 from services.xml_engine import render_invoice_html
 from ui.ai_widget import render_ai_widget
 
+
 def render_fatura_page():
-    """
-    E-Fatura modülünün ana render fonksiyonu.
-    """
     st.title("🧾 Fatura Yönetim Sistemi")
 
-    # 1. VERİ ÇEKME (Data Fetching)
-    # Bu kısmı aslında bir 'service' fonksiyonuna taşımak daha clean olur ama şimdilik burada kalsın.
     conn = get_connection()
-    # XML kolonu ağır olduğu için sadece ihtiyaç anında veya optimize çekilebilir.
-    # Şimdilik mevcut yapıyı koruyoruz.
+
     query = """
     SELECT [fatura_no],[cari_kod],[cari_ad],[stok_kod],[urun_adi],
            [urun_tarihi],[miktar],[birim_fiyat],[kdv_orani],[Toplam],[xml_ubl]
@@ -26,17 +21,15 @@ def render_fatura_page():
     """
     df = pd.read_sql(query, conn)
 
-    # 2. FİLTRELEME (Filtering)
-    filters = render_sidebar() 
+    # ---------------- FILTER ----------------
+    filters = render_sidebar()
     subset = apply_filters(df, filters)
-    
+
     st.divider()
 
-    # 3. TABLO GÖSTERİMİ (Data Grid)
-    # Tabloyu gösterme işini ui katmanına taşıyabiliriz veya burada tutabiliriz.
-    # Okunabilirlik için burada basit tutuyoruz.
+    # ---------------- TABLE ----------------
     event = st.dataframe(
-        subset.drop(columns=['xml_ubl'], errors='ignore'),
+        subset.drop(columns=["xml_ubl"], errors="ignore"),
         use_container_width=True,
         hide_index=True,
         selection_mode="single-row",
@@ -50,131 +43,132 @@ def render_fatura_page():
         }
     )
 
-    # 4. SEÇİM YÖNETİMİ (State Management)
-    # Tablodan tıklanan satırı yakalama
+    # ---------------- STATE INIT ----------------
+    if "fatura_select" not in st.session_state:
+        st.session_state.fatura_select = None
+
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
+
+    # ---------------- TABLE SELECTION ----------------
     if event and event.selection and event.selection["rows"]:
         idx = event.selection["rows"][0]
-        # Subset üzerinden iloc ile doğru satırı buluyoruz
         selected_row = subset.iloc[idx]
+
+        # Eğer farklı faturaya geçildiyse edit kapansın
+        if st.session_state.fatura_select != selected_row["fatura_no"]:
+            st.session_state.edit_mode = False
+
         st.session_state.fatura_select = selected_row["fatura_no"]
 
-    # Fatura Listesi ve Selectbox
-    fatura_list = subset['fatura_no'].unique().tolist()
-    
-    # Seçili fatura yoksa ilkini seç
-    if "fatura_select" not in st.session_state:
-        st.session_state.fatura_select = fatura_list[0] if fatura_list else None
-    
-    # Selectbox UI
+    # ---------------- FATURA LIST ----------------
+    fatura_list = subset["fatura_no"].unique().tolist()
+
+    if not fatura_list:
+        st.warning("Gösterilecek fatura bulunamadı.")
+        return
+
+    # Filtre sonrası seçim kaybolmasın
+    if st.session_state.fatura_select not in fatura_list:
+        st.session_state.fatura_select = fatura_list[0]
+
+    # ---------------- SELECTBOX ----------------
     selected_fatura_no = st.selectbox(
-        "📄 İşlem Yapılacak Fatura", 
-        fatura_list, 
-        key="fatura_select_box",
-        # Session state ile senkronize çalışması için index bulma mantığı eklenebilir
-        # ancak basitlik adına burada key ile bırakıyoruz.
-        index=fatura_list.index(st.session_state.fatura_select) if st.session_state.fatura_select in fatura_list else 0
+        "📄 İşlem Yapılacak Fatura",
+        fatura_list,
+        key="fatura_select"
     )
 
-    # Seçimi güncelle (Selectbox değişirse state de değişsin)
-    st.session_state.fatura_select = selected_fatura_no
-
-    # 5. AKSİYON BUTONLARI (Action Bar)
-    _render_action_buttons(subset, selected_fatura_no, conn)
-
-    # 6. AI WIDGET
-    render_ai_widget(subset)
-
-def _render_action_buttons(df, fatura_no, conn):
-    """
-    Aksiyon butonlarını ve edit modunu yöneten yardımcı fonksiyon.
-    Private (_) olarak işaretlendi.
-    """
+    # ---------------- ACTIONS ----------------
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if st.button("📄 FATURAYI GÖSTER", use_container_width=True):
-            # XML verisini çek
-            xml_data = df[df["fatura_no"] == fatura_no]["xml_ubl"].iloc[0] if not df[df["fatura_no"] == fatura_no].empty else None
-            
-            if xml_data:
-                render_invoice_html(xml_data)
+            xml_row = subset[subset["fatura_no"] == selected_fatura_no]
+
+            if not xml_row.empty:
+                xml_data = xml_row.iloc[0]["xml_ubl"]
+                if xml_data:
+                    render_invoice_html(xml_data)
+                else:
+                    st.warning("Bu faturaya ait XML verisi bulunamadı.")
             else:
-                st.warning("Bu faturaya ait XML verisi bulunamadı.")
+                st.warning("Fatura bulunamadı.")
 
     with col2:
         if st.button("✏️ FATURA DÜZENLE", use_container_width=True):
             st.session_state.edit_mode = True
 
-    # Edit Modu Kontrolü
-    if st.session_state.get("edit_mode", False):
-        _render_edit_mode(df, fatura_no, conn)
+    # ---------------- EDIT MODE ----------------
+    if st.session_state.edit_mode:
 
-def _render_edit_mode(df, fatura_no, conn):
-    """
-    Düzenleme formunu ve kayıt işlemini yönetir.
-    """
-    st.divider()
-    st.subheader(f"✏️ Düzenleniyor: {fatura_no}")
-    
-    edit_df = df[df["fatura_no"] == fatura_no]
+        st.divider()
+        st.subheader(f"✏️ Düzenleniyor: {selected_fatura_no}")
 
-    with st.form("edit_form"):
-        updates = render_edit_form(edit_df)
-        
-        col_cancel, col_save = st.columns([1, 4])
-        
-        with col_cancel:
-            if st.form_submit_button("❌ İptal", type="secondary"):
-                st.session_state.edit_mode = False
-                st.rerun()
-                
-        with col_save:
-            if st.form_submit_button("💾 DEĞİŞİKLİKLERİ KAYDET", type="primary"):
-                _save_invoice_updates(conn, updates, edit_df, fatura_no)
+        edit_df = subset[subset["fatura_no"] == selected_fatura_no]
 
-def _save_invoice_updates(conn, updates, original_df, fatura_no):
-    """
-    Veritabanı güncelleme işlemlerini yapar.
-    Service katmanına taşınabilir ama şimdilik burada.
-    """
-    try:
-        cur = conn.cursor()
-        
-        # 1. DB Update
-        for u in updates:
-            # u -> (cari_kod, cari_ad, urun_adi, miktar, birim_fiyat, kdv, tarih, fatura_no, stok_kod)
-            cur.execute("""
-            UPDATE FaturaDetay SET 
-                cari_kod=?, cari_ad=?, urun_adi=?, miktar=?, 
-                birim_fiyat=?, kdv_orani=?, urun_tarihi=?
-            WHERE fatura_no=? AND stok_kod=?
-            """, u)
-            
-        # 2. XML Update
-        old_xml = original_df.iloc[0]["xml_ubl"]
-        if old_xml:
-            new_xml = update_invoice_xml(old_xml, updates)
-            cur.execute("UPDATE FaturaDetay SET xml_ubl=? WHERE fatura_no=?", (new_xml, fatura_no))
-        
-        conn.commit()
-        
-        st.success("✅ Fatura başarıyla güncellendi!")
-        st.session_state.edit_mode = False
-        import time
-        time.sleep(1) # Kullanıcı success mesajını görsün diye
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"Hata oluştu: {str(e)}")
+        with st.form("edit_form"):
+            updates = render_edit_form(edit_df)
+
+            col_cancel, col_save = st.columns([1, 4])
+
+            with col_cancel:
+                if st.form_submit_button("❌ İptal", type="secondary"):
+                    st.session_state.edit_mode = False
+                    st.rerun()
+
+           # ... (üst kısımlar aynı)
+            with col_save:
+                if st.form_submit_button("💾 DEĞİŞİKLİKLERİ KAYDET", type="primary"):
+                    try:
+                        cur = conn.cursor()
+                        
+                        # 1. ÖNCE VERİTABANINDAKİ MEVCUT XML'İ TAZE OLARAK ÇEKİN
+                        # edit_df içindeki bayat veriyi kullanmak yerine güncel XML'i alıyoruz
+                        cur.execute("SELECT TOP 1 xml_ubl FROM FaturaDetay WHERE fatura_no=?", (selected_fatura_no,))
+                        row = cur.fetchone()
+                        current_xml = row[0] if row else None
+
+                        # 2. SATIR BAZLI GÜNCELLEMELERİ YAPIN
+                        for u in updates:
+                            cur.execute("""
+                            UPDATE FaturaDetay SET
+                                cari_kod=?, cari_ad=?, urun_adi=?, miktar=?,
+                                birim_fiyat=?, kdv_orani=?, urun_tarihi=?
+                            WHERE fatura_no=? AND stok_kod=?
+                            """, u)
+
+                        # 3. XML GÜNCELLEME VE KAYDETME
+                        if current_xml:
+                            # updates listesini kullanarak XML'i hafızada güncelleyin
+                            new_xml = update_invoice_xml(current_xml, updates)
+                            
+                            # Güncellenmiş XML'i o faturaya ait TÜM satırlara basın 
+                            # (Çünkü her satırda aynı XML tutuluyor gibi görünüyor)
+                            cur.execute(
+                                "UPDATE FaturaDetay SET xml_ubl=? WHERE fatura_no=?",
+                                (new_xml, selected_fatura_no)
+                            )
+
+                        conn.commit()
+
+                        st.success("✅ Fatura ve XML başarıyla güncellendi!")
+                        st.session_state.edit_mode = False
+                        st.rerun()
+# ...
+
+                    except Exception as e:
+                        st.error(f"Hata oluştu: {str(e)}")
+
+    # ---------------- AI ----------------
+    render_ai_widget(subset)
+
 
 def render_irsaliye_page():
-    """
-    E-İrsaliye modülünün ana render fonksiyonu.
-    """
     st.title("🚚 E-İrsaliye Yönetimi")
-    
+
     st.info("🚧 Bu modül şu anda geliştirme aşamasındadır.")
-    
+
     st.markdown("""
     ### Planlanan Özellikler:
     - İrsaliye listeleme

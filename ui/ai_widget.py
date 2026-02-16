@@ -86,6 +86,9 @@ def render_ai_widget(subset_df):
         justify-content: space-between;
         align-items: center;
         border-bottom: 1px solid #eee;
+        /* Mevcut CSS içine ekle */
+    .chat-container {
+        scroll-behavior: smooth;
     }
     </style>
     """, unsafe_allow_html=True)

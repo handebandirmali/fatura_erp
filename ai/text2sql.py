@@ -80,35 +80,25 @@ def text2sql_pipeline(prompt, llm):
     except Exception as e:
         return f"Sorgu çalıştırılırken hata oluştu: {str(e)}"
 
+    # KRİTİK NOKTA: Veri boşsa direkt cevap dön, LLM'e yorumlatma
     if df is None or df.empty:
-        return "Aradığınız kriterlere uygun veri bulunamadı. 🐔"
+        return "Aradığınız kriterlere (örneğin %30 KDV) uygun herhangi bir kayıt veritabanında bulunamadı. 🐔"
 
-    # 2. SONUCU YORUMLAMA AŞAMASI (FORMAT BURADA BELİRLENİR)
-    
-    # Veriyi stringe çevir (AI okusun diye)
+    # Veriyi stringe çevir
     preview = df.head(20).to_string(index=False)
 
-    # --- İŞTE BURAYI DEĞİŞTİRDİK ---
     summary_system = """
-    Senin adın 'GıtGıt'. Sen yardımsever, neşeli bir ERP asistanısın. 🐔
+    Senin adın 'GıtGıt'. Sen yardımsever bir ERP asistanısın. 🐔
     
     GÖREVİN:
-    Aşağıdaki SQL sorgusu sonucunu kullanıcıya raporla.
+    Sana verilen veritabanı sonuçlarını kullanıcıya raporlamak.
 
-    KESİN KURALLAR (Lütfen Harfiyen Uy):
-    1. ASLA ve ASLA Markdown Tablosu ( | | | ) formatı kullanma.
-    2. Cevabı sohbet balonunda rahat okunacak şekilde "Metin" veya "Liste" olarak ver.
-    3. Eğer birden fazla satır varsa, madde işaretleri (bullet points) kullan.
-    4. Parasal değerleri (TL) ve Önemli İsimleri **kalın** yazarak vurgula.
-    5. Samimi ol, emoji kullanabilirsin (🐔, 📊, ✅).
-    6. Sonuçları özetle, kullanıcıyı veriye boğma.
-
-    Örnek Çıktı Formatı:
-    "İstediğiniz verileri buldum! İşte detaylar:
-    • **ABC Firması**: 500 TL (Fatura: FT-101)
-    • **XYZ Ltd**: 1.200 TL (Fatura: FT-102)
-    
-    Toplam 2 kayıt listelendi."
+    KESİN KURALLAR:
+    1. Sadece sana verilen "Veritabanından Gelen Sonuç" kısmındaki bilgileri kullan.
+    2. Eğer veri boşsa veya "Empty DataFrame" ibaresi görüyorsan, kesinlikle "Kayıt bulunamadı" de.
+    3. ASLA hayali veri, fatura numarası veya tutar uydurma.
+    4. Bilgin yoksa "Bu konuda sistemde bir kayıt göremiyorum" de.
+    5. Parasal değerleri **kalın** yaz.
     """
 
     summary_messages = [

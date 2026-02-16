@@ -29,7 +29,8 @@ def run_ai(prompt: str, subset_df, chat_history):
         model="llama3.2:3b",
         temperature=0
     )
-
+    if clean_df.empty:
+            return "Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı."
     system_content = f"""
 Sen bir ERP uzmanısın.
 Hızlı cevap ver.

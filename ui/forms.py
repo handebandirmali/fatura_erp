@@ -14,7 +14,7 @@ def render_edit_form(edit_df):
 
         e,f,t = st.columns(3)
         urun_adi = e.text_input("Ürün", row["urun_adi"], key=f"e{i}")
-        miktar = f.number_input("Miktar", value=float(row["miktar"]), key=f"f{i}")
+        miktar_girdisi = f.number_input("Miktar", value=float(row["miktar"]), key=f"f{i}")
         birim_fiyat = t.number_input("Birim Fiyat", value=float(row["birim_fiyat"]), key=f"t{i}")
 
         g,h = st.columns(2)
@@ -22,7 +22,7 @@ def render_edit_form(edit_df):
         urun_tarihi = h.date_input("Ürün Tarihi", row["urun_tarihi"], key=f"h{i}")
 
         updates.append((
-            cari_kod, cari_ad, urun_adi, miktar,
+            cari_kod, cari_ad, urun_adi, miktar_girdisi,
             birim_fiyat, kdv_orani, urun_tarihi,
             row["fatura_no"], stok_kod
         ))

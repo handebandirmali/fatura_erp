@@ -15,19 +15,19 @@ def update_invoice_xml(xml_string, updates):
 
     for line, u in zip(invoice_lines, updates):
 
-        cari_kod, cari_ad, urun_adi, miktar, birim_fiyat, kdv_orani, urun_tarihi, fatura_no, stok_kod = u
+        cari_kod, cari_ad, urun_adi, miktar_girdisi, birim_fiyat, kdv_orani, urun_tarihi, fatura_no, stok_kod = u
 
-        miktar = float(miktar)
+        miktar_girdisi = float(miktar_girdisi)
         birim_fiyat = float(birim_fiyat)
         kdv_orani = float(kdv_orani)
 
-        ara_toplam = miktar * birim_fiyat
+        ara_toplam = miktar_girdisi * birim_fiyat
         kdv_tutari = ara_toplam * kdv_orani / 100
 
         total_without_tax += ara_toplam
         total_tax += kdv_tutari
 
-        line.find("cbc:InvoicedQuantity", ns).text = f"{miktar:.2f}"
+        line.find("cbc:InvoicedQuantity", ns).text = f"{miktar_girdisi:.2f}"
         line.find("cac:Price/cbc:PriceAmount", ns).text = f"{birim_fiyat:.2f}"
         line.find("cbc:LineExtensionAmount", ns).text = f"{ara_toplam:.2f}"
 

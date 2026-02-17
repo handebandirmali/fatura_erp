@@ -1,3 +1,10 @@
+"""
+Bu dosya, UBL formatındaki e-fatura XML verisini XSLT kullanarak
+şık bir HTML fatura görünümüne dönüştürür, oluşturulan çıktıyı
+' fatura_onizleme.html ' dosyasına kaydeder ve varsayılan tarayıcıda
+otomatik olarak açarak önizleme sağlar.
+"""
+
 import lxml.etree as ET
 import os
 import webbrowser

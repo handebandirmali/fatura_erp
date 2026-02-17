@@ -1,8 +1,15 @@
+"""
+Bu dosya, filtrelenmiş ERP verisini (DataFrame) bağlam olarak kullanarak
+Ollama üzerindeki LLM'e soru yönlendirir, cevabı Streamlit arayüzünde
+token token (streaming) şekilde gösterir ve modeli tabloya göre
+cevap vermeye zorlar.
+"""
+
 import pandas as pd
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.callbacks import BaseCallbackHandler
 
-from langchain.callbacks.base import BaseCallbackHandler
 from typing import Any
 
 class StreamlitHandler(BaseCallbackHandler):

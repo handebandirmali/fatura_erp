@@ -1,3 +1,9 @@
+## Bu dosya, Streamlit tabanlı Fatura ve E-İrsaliye yönetim sayfalarını render eder;
+#  faturaları veritabanından çeker, filtreler, listeleyip düzenlemeye ve XML güncellemeye imkan tanır 
+# AI sohbet widget’ını entegre eder.
+
+
+
 import streamlit as st
 import pandas as pd
 from db.connection import get_connection

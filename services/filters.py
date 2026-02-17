@@ -1,3 +1,9 @@
+"""
+Bu dosya, ERP veri tablosu (DataFrame) üzerinde kullanıcıdan gelen
+filtre kriterlerini uygular ve metin, tarih ve sayısal alanlara göre
+veriyi daraltarak filtrelenmiş alt kümesini (subset) döndürür.
+"""
+
 import pandas as pd
 
 def apply_filters(df, filters):
@@ -36,7 +42,7 @@ def apply_filters(df, filters):
             target_miktar = float(filters["miktar_filter"])
             subset = subset[subset["miktar"] == target_miktar]
         except (ValueError, TypeError):
-            pass # Sayısal bir değer girilmemişse filtreleme yapma
+            pass  # Sayısal bir değer girilmemişse filtreleme yapma
 
     # 5. Sayısal Filtreler (Fiyat)
     if filters.get("fiyat_min") is not None and filters.get("fiyat_max") is not None:

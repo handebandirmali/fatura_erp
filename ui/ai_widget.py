@@ -1,3 +1,6 @@
+# Bu dosya, Streamlit içinde sağ altta floating bir popover AI sohbet widget'ı (GıtGıt Asistan) oluşturur; 
+# sohbet geçmişini yönetir, kullanıcı mesajlarını alır ve run_ai fonksiyonu ile yanıt üretir.
+
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
 from streamlit_float import *

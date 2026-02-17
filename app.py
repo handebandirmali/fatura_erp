@@ -1,3 +1,6 @@
+# ERP uygulamasının ana giriş dosyasıdır; sayfa ayarlarını yapar, 
+# sidebar navigasyonunu oluşturur ve seçilen modüle göre Fatura veya İrsaliye sayfasını render eder.
+
 import streamlit as st
 from ui.fatura_view import render_fatura_page , render_irsaliye_page
 

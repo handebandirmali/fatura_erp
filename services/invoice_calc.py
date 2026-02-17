@@ -1,3 +1,10 @@
+"""
+Bu dosya, UBL formatındaki e-fatura XML içeriğini verilen güncel
+satır verilerine göre günceller; fatura başlık bilgilerini (cari, tarih,
+fatura no) ve satır detaylarını (ürün, miktar, fiyat, KDV) yeniden hesaplayarak
+XML toplam tutar alanlarını otomatik olarak güncelleyip yeni XML çıktısını döndürür.
+"""
+
 import lxml.etree as ET
 
 def update_invoice_xml(xml_string, updates):

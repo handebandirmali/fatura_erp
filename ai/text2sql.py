@@ -1,3 +1,10 @@
+"""
+Bu dosya, kullanıcının doğal dilde sorduğu soruyu LLM ile MS SQL uyumlu
+bir SELECT sorgusuna çevirir, güvenlik kontrolünden geçirir, veritabanında
+çalıştırır ve dönen sonucu tekrar LLM'e özetlettirerek kullanıcıya
+ERP asistanı formatında raporlar.
+"""
+
 import re
 import pandas as pd
 

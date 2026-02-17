@@ -1,3 +1,6 @@
+## Seçilen faturaya ait satırları Streamlit form alanları olarak render eder 
+#  kullanıcıdan alınan güncellenmiş değerleri veritabanı update işlemi için tuple listesi olarak döndürür.
+
 import streamlit as st
 
 def render_edit_form(edit_df):

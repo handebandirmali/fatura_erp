@@ -1,3 +1,7 @@
+# Fatura listesi için gelişmiş filtre sidebar'ını oluşturur;
+#  filtre inputlarını üretir, reset mekanizmasını yönetir 
+# seçilen filtre değerlerini sözlük olarak döndürür.
+
 import streamlit as st
 from datetime import datetime, date
 

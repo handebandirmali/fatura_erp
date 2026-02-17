@@ -1,3 +1,9 @@
+"""
+Bu dosya, kullanıcıdan gelen sorunun SQL gerektirip gerektirmediğini
+anahtar kelimelere bakarak tespit eder. Eğer soru veri sorgulamaya
+benziyorsa text2sql pipeline'ını çalıştırır, değilse soruyu doğrudan LLM'e yönlendirir.
+"""
+
 import re
 from ai.text2sql import text2sql_pipeline
 

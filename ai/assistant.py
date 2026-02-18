@@ -31,28 +31,19 @@ class StreamlitHandler(BaseCallbackHandler):
         self.placeholder.markdown(bubble_html, unsafe_allow_html=True)
 
         
+# assistant.py (İlgili kısım)
 def run_ai(prompt: str, subset_df, chat_history, placeholder):
-
-    clean_df = subset_df.copy()
-    context_table = clean_df.drop(columns=['xml_ubl'], errors='ignore').head(15).to_string(index=False)
-
-    if clean_df.empty:
-        placeholder.markdown("Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı.")
-        return "Üzgünüm, filtrelediğiniz kriterlere uygun fatura bulunamadı."
-
-    system_content = f"Sen bir ERP uzmanısın. Tabloya göre cevap ver.\n\nTablo:\n{context_table}"
-
-    messages = [SystemMessage(content=system_content)] + chat_history + [HumanMessage(content=prompt)]
-
+    # Ollama'yı hazırla
     stream_handler = StreamlitHandler(placeholder)
+    llm = ChatOllama(model="llama3.2:3b", temperature=0, streaming=True, callbacks=[stream_handler])
 
-    llm = ChatOllama(
-        model="llama3.2:3b",
-        temperature=0,
-        streaming=True,
-        callbacks=[stream_handler]
-    )
+    # Yönlendiriciyi çalıştır
+    result = route_question(prompt, chat_history, llm)
 
-    response = llm.invoke(messages)
+    # Eğer Vanna'dan veri geldiyse sonucu kullanıcıya açıkla
+    if "VERI_SONUCU:" in str(result):
+        # Burada sonucu tekrar Ollama'ya sorup kibar bir dille açıklatıyoruz
+        explanation = llm.invoke(f"Bu veritabanı sonucunu kullanıcıya özetle: {result}")
+        return explanation.content
 
-    return response.content
+    return str(result)

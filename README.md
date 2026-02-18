@@ -3,6 +3,6 @@ streamlit run app.py
 
 git pull origin main >>> cekme github 
 
-git add . >>> ekleme github 
+git add . 
 git commit -m "dosya güncellendi"
 git push origin main

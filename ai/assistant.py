@@ -12,7 +12,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from typing import Any
 import asyncio
 
-from ai.memory.in_memory import InMemoryAgentMemory
+from ai.memory.base import InMemoryAgentMemory
 from ai.tools.model import ToolContext
 
 

@@ -14,8 +14,12 @@ def render_ai_widget(subset_df):
     # --- 1. STATE & BAŞLANGIÇ MESAJI ---
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [
-            AIMessage(content="Merhaba! Ben **GıtGıt** 🐔. \n\nVerilerinizle ilgili bana soru sorabilirsiniz.")
-        ]
+    {
+        "role": "assistant",
+        "message": "Merhaba! Ben **GıtGıt** 🐔.\n\nBana soru sorabilirsiniz."
+    }
+]
+
 
     # --- 2. GELİŞMİŞ CSS (WhatsApp Tarzı UI) ---
     st.markdown("""
@@ -109,7 +113,6 @@ def render_ai_widget(subset_df):
         # Popover'ı aç
         with st.popover("🐔", use_container_width=False):
             
-            # --- ÖZEL BAŞLIK ALANI (HTML ile) ---
             # Standart st.subheader yerine daha şık bir HTML başlık
             st.markdown(f"""
                 <div class="chat-header">
@@ -120,7 +123,10 @@ def render_ai_widget(subset_df):
             # Sağ üst köşeye temizleme butonu (Streamlit butonu olarak ekliyoruz ki işlevi çalışsın)
             # Başlığın hemen altına ince bir buton koyuyoruz
             if st.button("🧹 Sohbeti Temizle", key="clear_chat_fancy", use_container_width=True):
-                st.session_state.chat_history = [AIMessage(content="Tertemiz bir sayfa! 🧼 Nasıl yardımcı olabilirim?")]
+                st.session_state.chat_history = [{
+                    "role": "assistant",
+                    "message": "Tertemiz bir sayfa! 🧼 Nasıl yardımcı olabilirim?"
+                }]
                 st.rerun()
 
             # --- SOHBET ALANI (Scrollable) ---
@@ -131,16 +137,11 @@ def render_ai_widget(subset_df):
                 messages_html = '<div class="chat-container">'
                 
                 for msg in st.session_state.chat_history:
-                    if isinstance(msg, HumanMessage):
-                        # Kullanıcı Mesajı
-                        messages_html += f'<div class="bubble user-bubble">{msg.content}</div>'
+                    if msg["role"] == "user":
+                        messages_html += f'<div class="bubble user-bubble">{msg["message"]}</div>'
                     else:
-                        # Asistan Mesajı
-                        # Markdown içeriğini HTML'e çevirmek biraz zor olabilir, 
-                        # basit metin için bu yöntem harikadır. Karmaşık markdown varsa st.chat_message daha iyidir.
-                        # Ancak görsellik için HTML tercih ettik:
-                        messages_html += f'<div class="bubble bot-bubble">🐔 {msg.content}</div>'
-                
+                        messages_html += f'<div class="bubble bot-bubble">🐔 {msg["message"]}</div>'
+                              
                 messages_html += '</div>'
                 st.markdown(messages_html, unsafe_allow_html=True)
 
@@ -151,7 +152,11 @@ def render_ai_widget(subset_df):
             if prompt := st.chat_input("Mesajınızı yazın..."):
                 
                 # 1. Kullanıcı mesajını ekle
-                st.session_state.chat_history.append(HumanMessage(content=prompt))
+                st.session_state.chat_history.append({
+                    "role": "user",
+                    "message": prompt
+                })
+
                 
                 # UI'ı anlık güncellemek için tekrar HTML basıyoruz (kullanıcı mesajı görünsün diye)
                 with chat_box:
@@ -178,7 +183,11 @@ def render_ai_widget(subset_df):
                 stop_placeholder.empty()
 
                 # 3. Cevabı ekle ve kaydet
-                st.session_state.chat_history.append(AIMessage(content=response_text))
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "message": response_text
+                })
+
                 st.rerun() # Mesajların düzgün sıralanması için sayfayı yenile
 
     # --- 4. POZİSYONLAMA ---

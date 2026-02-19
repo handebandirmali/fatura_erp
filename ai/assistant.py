@@ -1,22 +1,21 @@
 """
-Bu dosya, filtrelenmis ERP verisini (DataFrame) baglam olarak kullanarak
-LLM'e soru yonlendirir, cevabi streaming sekilde gosterir
-ve AgentMemory'den hem okur hem yazar.
+ERP AI Assistant
+Session history + Semantic restart memory
 """
 
-import pandas as pd
-from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.callbacks import BaseCallbackHandler
-
+import json
 from typing import Any
 import asyncio
 
-from ai.memory.base import InMemoryAgentMemory
+from langchain_ollama import ChatOllama
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.callbacks import BaseCallbackHandler
+
+from ai.memory.chromadb_memory import ChromaAgentMemory
 from ai.tools.model import ToolContext
 
 
-memory = InMemoryAgentMemory()
+memory = ChromaAgentMemory()
 
 
 class StreamlitHandler(BaseCallbackHandler):
@@ -47,50 +46,99 @@ def run_ai(prompt: str, subset_df, chat_history, placeholder):
     )
 
     clean_df = subset_df.copy()
-    context_table = clean_df.drop(columns=['xml_ubl'], errors='ignore').head(15).to_string(index=False)
 
-    if clean_df.empty:
-        return "Filtreye uygun veri bulunamadi."
+    clean_df = clean_df.astype(str).fillna("")
+    context_table_json = clean_df.drop(
+        columns=['xml_ubl'], 
+        errors='ignore'
+        ).head(15).to_dict(orient='records')
 
-    # -----------------------------
-    # MEMORY OKUMA
-    # -----------------------------
-    try:
-        recent_memories = asyncio.run(
-            memory.get_recent_text_memories(context, limit=10)
-        )
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        recent_memories = loop.run_until_complete(
-            memory.get_recent_text_memories(context, limit=10)
-        )
+    context_table = json.dumps(
+        context_table_json, 
+        indent=2, 
+        ensure_ascii=False)
 
-    memory_context = ""
-    if recent_memories:
-        memory_context = "\n\nGecmis Konusmalar:\n"
-        for m in recent_memories:
-            memory_context += f"{m.content}\n"
 
     # -----------------------------
-    # SYSTEM PROMPT
+    # system prompt
     # -----------------------------
     system_content = f"""
-Sen bir ERP uzmanisin.
+        Sen bir erp uzmani ve asistasin.
 
-Tablo bilgisi:
-{context_table}
+        tablo bilgisi:
+        {context_table}
 
-{memory_context}
+        Kurallar:
+        - Tablo sorularini tablodan cevapla.
+        - Gecmis sorular icin semantic hafiza kullan.
+        - Cevap kisa, net, madde madde.
+        """
 
-Tabloya gore cevap ver.
-Eger soru tablo disi gecmis konusma ile ilgiliyse,
-Gecmis Konusmalar bolumunu kullan.
-"""
 
-    messages = (
-        [SystemMessage(content=system_content)]
-        + [HumanMessage(content=prompt)]
-    )
+    messages = [SystemMessage(content=system_content)]
+    
+    # -------------------------------------------------
+    # SESSION VARSA → CHAT HISTORY KULLAN
+    # -------------------------------------------------
+
+    if chat_history:
+        for ch in chat_history[-5:]:
+            if ch["role"] == "assistant":
+                messages.append(AIMessage(content=ch["message"]))
+            else:
+                messages.append(HumanMessage(content=ch["message"]))
+
+    else:
+        # -------------------------------------------------
+        # SESSION YOKSA → SEMANTIC MEMORY KULLAN
+        # -------------------------------------------------
+        try:
+            similar_memories = asyncio.run(
+                memory.search_text_memories(
+                    query=prompt,
+                    context=context,
+                    limit=5,
+                    similarity_threshold=0.6,
+                )
+            )
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+            similar_memories = loop.run_until_complete(
+                memory.search_text_memories(
+                    query=prompt,
+                    context=context,
+                    limit=5,
+                    similarity_threshold=0.6,
+                )
+            )
+
+        if similar_memories:
+
+            # similarity sıralama
+            similar_memories = sorted(
+                similar_memories,
+                key=lambda x: x.similarity_score,
+                reverse=True
+            )
+
+            best_score = similar_memories[0].similarity_score
+
+            # semantic gating
+            if best_score >= 0.75:
+
+                for result in similar_memories[:2]:
+                    try:
+                        data = json.loads(result.memory.content)
+                        messages.append(HumanMessage(content=data["user"]))
+                        messages.append(AIMessage(content=data["assistant"]))
+                    except Exception:
+                        continue
+
+    # -------------------------------------------------
+    # YENİ SORU
+    # -------------------------------------------------
+
+    messages.append(HumanMessage(content=prompt))
 
     stream_handler = StreamlitHandler(placeholder)
 
@@ -103,13 +151,19 @@ Gecmis Konusmalar bolumunu kullan.
 
     response = llm.invoke(messages)
 
-    # -----------------------------
-    # MEMORY KAYDI
-    # -----------------------------
+    # -------------------------------------------------
+    # MEMORY SAVE (ROLE AYRIMLI)
+    # -------------------------------------------------
+
+    memory_payload = json.dumps({
+        "user": prompt,
+        "assistant": response.content
+    })
+
     try:
         asyncio.run(
             memory.save_text_memory(
-                content=f"Soru: {prompt}\nCevap: {response.content}",
+                content=memory_payload,
                 context=context,
             )
         )
@@ -117,7 +171,7 @@ Gecmis Konusmalar bolumunu kullan.
         loop = asyncio.get_event_loop()
         loop.run_until_complete(
             memory.save_text_memory(
-                content=f"Soru: {prompt}\nCevap: {response.content}",
+                content=memory_payload,
                 context=context,
             )
         )

@@ -1,9 +1,3 @@
-## Bu dosya, Streamlit tabanlı Fatura ve E-İrsaliye yönetim sayfalarını render eder;
-#  faturaları veritabanından çeker, filtreler, listeleyip düzenlemeye ve XML güncellemeye imkan tanır 
-# AI sohbet widget’ını entegre eder.
-
-
-
 import streamlit as st
 import pandas as pd
 from db.connection import get_connection
@@ -13,7 +7,6 @@ from services.filters import apply_filters
 from services.invoice_calc import update_invoice_xml
 from services.xml_engine import render_invoice_html
 from ui.ai_widget import render_ai_widget
-
 
 def render_fatura_page():
     st.title("🧾 Fatura Yönetim Sistemi")
@@ -49,123 +42,70 @@ def render_fatura_page():
         }
     )
 
-    # ---------------- STATE INIT ----------------
     if "fatura_select" not in st.session_state:
         st.session_state.fatura_select = None
-
     if "edit_mode" not in st.session_state:
         st.session_state.edit_mode = False
 
-    # ---------------- TABLE SELECTION ----------------
     if event and event.selection and event.selection["rows"]:
         idx = event.selection["rows"][0]
         selected_row = subset.iloc[idx]
-
-        # Eğer farklı faturaya geçildiyse edit kapansın
         if st.session_state.fatura_select != selected_row["fatura_no"]:
             st.session_state.edit_mode = False
-
         st.session_state.fatura_select = selected_row["fatura_no"]
 
-    # ---------------- FATURA LIST ----------------
     fatura_list = subset["fatura_no"].unique().tolist()
-
     if not fatura_list:
         st.warning("Gösterilecek fatura bulunamadı.")
         return
 
-    # Filtre sonrası seçim kaybolmasın
     if st.session_state.fatura_select not in fatura_list:
         st.session_state.fatura_select = fatura_list[0]
 
-    # ---------------- SELECTBOX ----------------
-    selected_fatura_no = st.selectbox(
-        "📄 İşlem Yapılacak Fatura",
-        fatura_list,
-        key="fatura_select"
-    )
+    selected_fatura_no = st.selectbox("📄 İşlem Yapılacak Fatura", fatura_list, key="fatura_select")
 
-    # ---------------- ACTIONS ----------------
     col1, col2 = st.columns(2)
-
     with col1:
         if st.button("📄 FATURAYI GÖSTER", use_container_width=True):
             xml_row = subset[subset["fatura_no"] == selected_fatura_no]
-
             if not xml_row.empty:
                 xml_data = xml_row.iloc[0]["xml_ubl"]
-                if xml_data:
-                    render_invoice_html(xml_data)
-                else:
-                    st.warning("Bu faturaya ait XML verisi bulunamadı.")
-            else:
-                st.warning("Fatura bulunamadı.")
+                render_invoice_html(xml_data) if xml_data else st.warning("XML bulunamadı.")
 
     with col2:
         if st.button("✏️ FATURA DÜZENLE", use_container_width=True):
             st.session_state.edit_mode = True
 
-    # ---------------- EDIT MODE ----------------
     if st.session_state.edit_mode:
-
         st.divider()
         st.subheader(f"✏️ Düzenleniyor: {selected_fatura_no}")
-
         edit_df = subset[subset["fatura_no"] == selected_fatura_no]
-
         with st.form("edit_form"):
             updates = render_edit_form(edit_df)
-
             col_cancel, col_save = st.columns([1, 4])
-
             with col_cancel:
-                if st.form_submit_button("❌ İptal", type="secondary"):
+                if st.form_submit_button("❌ İptal"):
                     st.session_state.edit_mode = False
                     st.rerun()
-
             with col_save:
                 if st.form_submit_button("💾 DEĞİŞİKLİKLERİ KAYDET", type="primary"):
                     try:
                         cur = conn.cursor()
-
                         for u in updates:
-                            cur.execute("""
-                            UPDATE FaturaDetay SET
-                                cari_kod=?, cari_ad=?, urun_adi=?, miktar=?,
-                                birim_fiyat=?, kdv_orani=?, urun_tarihi=?
-                            WHERE fatura_no=? AND stok_kod=?
-                            """, u)
-
+                            cur.execute("UPDATE FaturaDetay SET cari_kod=?, cari_ad=?, urun_adi=?, miktar=?, birim_fiyat=?, kdv_orani=?, urun_tarihi=? WHERE fatura_no=? AND stok_kod=?", u)
                         old_xml = edit_df.iloc[0]["xml_ubl"]
-
                         if old_xml:
                             new_xml = update_invoice_xml(old_xml, updates)
-                            cur.execute(
-                                "UPDATE FaturaDetay SET xml_ubl=? WHERE fatura_no=?",
-                                (new_xml, selected_fatura_no)
-                            )
-
+                            cur.execute("UPDATE FaturaDetay SET xml_ubl=? WHERE fatura_no=?", (new_xml, selected_fatura_no))
                         conn.commit()
-
-                        st.success("✅ Fatura başarıyla güncellendi!")
+                        st.success("✅ Güncellendi!")
                         st.session_state.edit_mode = False
                         st.rerun()
+                    except Exception as e: st.error(f"Hata: {e}")
 
-                    except Exception as e:
-                        st.error(f"Hata oluştu: {str(e)}")
-
-    # ---------------- AI ----------------
     render_ai_widget(subset)
-
 
 def render_irsaliye_page():
     st.title("🚚 E-İrsaliye Yönetimi")
-
     st.info("🚧 Bu modül şu anda geliştirme aşamasındadır.")
-
-    st.markdown("""
-    ### Planlanan Özellikler:
-    - İrsaliye listeleme
-    - Depo stok kontrolü
-    - İrsaliye -> Fatura dönüşümü
-    """)
+    st.markdown("### Planlanan Özellikler:\n- İrsaliye listeleme\n- Depo stok kontrolü\n- İrsaliye -> Fatura dönüşümü")

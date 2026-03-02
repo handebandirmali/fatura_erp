@@ -9,7 +9,7 @@ import re
 import pandas as pd
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from db.repository import run_query
+from connection_db.repository import run_query
 
 
 def _clean_sql(sql):

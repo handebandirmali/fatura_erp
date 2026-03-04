@@ -1,26 +1,25 @@
-"""
-Bu dosya, kullanıcıdan gelen sorunun SQL gerektirip gerektirmediğini
-anahtar kelimelere bakarak tespit eder. Eğer soru veri sorgulamaya
-benziyorsa text2sql pipeline'ını çalıştırır, değilse soruyu doğrudan LLM'e yönlendirir.
-"""
-
-import re
-from ai.text2sql import text2sql_pipeline
-
-
-def _looks_like_sql_question(prompt):
-    p = prompt.lower()
-
-    keywords = [
-        "kaç", "toplam", "listele", "getir", "göster", "en çok", "en az",
-        "cari", "stok", "ürün", "fatura", "kdv", "miktar", "tutar"
-    ]
-
-    return any(k in p for k in keywords)
-
+from ai.run_sql_tool.sql_runner import run_ai_engine
 
 def route_question(prompt, messages, llm):
-    if _looks_like_sql_question(prompt):
-        return text2sql_pipeline(prompt, llm)
+    """Asistanı LangGraph SQL motoruna bağlar."""
+    try:
+        # LangGraph akışını (StateGraph) başlatır
+        result = run_ai_engine(prompt)
+        
+        # 1. Senaryo: SQL başarıyla çalıştı ve asistan bir özet (summary) üretti
+        if result and result.get("summary"):
+            return result["summary"]
+        
+        # 2. Senaryo: SQL çalıştı, veri geldi ama özetleme aşamasında takıldıysa
+        # Veriyi ham haliyle değil, daha okunabilir bir formatta sunabiliriz
+        if result and result.get("data") and len(result["data"]) > 0:
+            return f"Sorgu sonucunda şu kayıtlar bulundu: {result['data']}"
 
-    return llm.invoke(messages).content
+        # 3. Senaryo: Sorgu başarılı ama veritabanında o kod yok
+        return "Veritabanında bu kriterlere uygun bir kayıt bulunamadı."
+
+    except Exception as e:
+        print(f"--- ROUTER HATASI: {e} ---")
+        # B planı: Eğer SQL motoru (bağlantı hatası, şema hatası vb.) tamamen çökerse
+        # LLM normal bir sohbet robotu gibi elindeki genel bilgilerle cevap verir.
+        return llm.invoke(messages).content

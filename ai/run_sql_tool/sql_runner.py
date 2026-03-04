@@ -1,500 +1,364 @@
-import re
-from datetime import datetime
-from typing import Any, List, Dict, Optional, Tuple
-from typing_extensions import TypedDict
+""" parametrik 
+sql execute json doner 
+db baglantisini kullanilir 
+""" 
 
-from langgraph.graph import END, START, StateGraph
-from langchain_core.prompts import ChatPromptTemplate
+import json 
+import re 
+from typing import Any, Optional 
+from langgraph.graph import END, START, StateGraph 
+from langchain_core.prompts import ChatPromptTemplate 
+from typing_extensions import TypedDict 
+from ai.run_sql_tool.sql_guard import RunSqlTool 
+from ai.tools.model import ToolContext 
+from ai.run_sql_tool.sql_runner_models import RunSqlToolArgs 
+from connection_db.connection import run_uri, llm_run , run_query
 
-from connection_db.connection import llm_run, run_query
+# ---------------- INIT ---------------- 
+db = run_uri() 
+llm = llm_run() 
+sql_guard = RunSqlTool(sql_runner=run_query)
+MAX_RETRY = 2 
 
+# ---------------- STATE ---------------- 
+class State(TypedDict):     
+    question: str     
+    tables: list[str] # DB Discovery     
+    schema: str # Sql icin context     
+    sql: str     
+    data: list     
+    row_count: int # Business logic     
+    error: str # of sql execution     
+    tries: int # retry logic icin     
+    summary: str # final answer icin     
+    
 
-# ---------------- INIT ----------------
-llm = llm_run()
+# ---------------- FINAL JSON OUTPUT ---------------- 
+class FinalOutput(TypedDict):     
+    success: bool     
+    question: str     
+    sql: str     
+    row_count: int     
+    data: list     
+    summary: str 
+    
 
-# ---------------- STATE ----------------
-class State(TypedDict):
-    question: str
-    tables: List[str]
-    schema: str
-    sql: str
-    data: List[Any]
-    row_count: int
-    error: str
-    tries: int
-    summary: str
+# ---------------- HELPERS ---------------- 
 
+ALLOWED_START = ("SELECT", "WITH")
 
-# ---------------- CONSTANTS ----------------
-TABLE = "FaturaDetay"
+def clean_sql(sql: str) -> str:
+    if not sql or not isinstance(sql, str):
+        raise ValueError("SQL string must be provided")
 
-COLUMNS = [
-    "fatura_no",
-    "cari_kod",
-    "cari_ad",
-    "stok_kod",
-    "urun_adi",
-    "urun_tarihi",
-    "fiili_tarih",
-    "miktar",
-    "birim_fiyat",
-    "kdv_orani",
-    "toplam",
-]
+    # 1. Markdown bloklarını temizle
+    sql = re.sub(r"```[a-zA-Z]*", "", sql)
+    sql = sql.replace("```", "")
 
-FIELD_LABELS = {
-    "fatura_no": "Fatura No",
-    "cari_kod": "Cari Kod",
-    "cari_ad": "Cari",
-    "stok_kod": "Stok Kod",
-    "urun_adi": "Ürün",
-    "urun_tarihi": "Ürün Tarihi",
-    "fiili_tarih": "Fiili Tarih",
-    "miktar": "Miktar",
-    "birim_fiyat": "Birim Fiyat",
-    "kdv_orani": "KDV Oranı",
-    "toplam": "Toplam",
-}
+    # 2. SQL yorumlarını temizle
+    sql = re.sub(r"--.*", "", sql)
+    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
 
-COLLATE = "Turkish_CI_AI"
-
-FIELD_SYNONYMS: Dict[str, List[str]] = {
-    "fatura_no": ["fatura no", "fatura numarası", "fatura numarasi"],
-    "cari_kod": ["cari kod", "cari kodu", "carikod", "cari_kod", "müşteri kod", "musteri kod"],
-    "cari_ad": ["cari", "firma", "şirket", "sirket", "cari adı", "cari adi", "firma adı", "firma adi", "şirket adı", "sirket adi"],
-    "stok_kod": ["stok kod", "stok kodu", "stokkod", "stok_kod", "ürün kod", "urun kod"],
-    "urun_adi": ["ürün", "urun", "ürün adı", "urun adi", "ürün ismi", "urun ismi", "hangi ürün", "hangi urun", "aldık", "aldik", "almışız", "almisiz"],
-    "birim_fiyat": ["fiyat", "birim fiyat", "birim_fiyat", "kaç tl", "kac tl", "ücreti", "ucreti", "ne kadar"],
-    "kdv_orani": ["kdv", "kdv oran", "kdv oranı", "kdv_orani"],
-    "toplam": ["toplam", "tutar", "genel toplam", "toplam tutar"],
-    "miktar": ["miktar", "adet", "kaç adet", "kac adet", "kaç tane", "kac tane", "qty"],
-    "fiili_tarih": ["fiili tarih", "işlem tarihi", "islem tarihi", "tarih"],
-    "urun_tarihi": ["ürün tarihi", "urun tarihi"],
-}
-
-
-# ---------------- HELPERS ----------------
-def get_manual_schema() -> str:
-    return f"""
-Tablo Adı: {TABLE}
-Sütunlar:
-- {", ".join(COLUMNS)}
-""".strip()
-
-
-def clean_sql(raw: str) -> str:
-    s = str(raw or "").strip()
-    s = re.sub(r"```sql|```", "", s, flags=re.IGNORECASE).strip()
-    s = re.sub(r"\bundefined\b", "", s, flags=re.IGNORECASE).strip()
-    match = re.search(r"(SELECT[\s\S]+?)(?:;|$|\n\n|Bu sorgu)", s, re.IGNORECASE)
+    # 3. SADECE SELECT veya WITH ile başlayan kısmı yakala (En önemli kısım)
+    # Sorgunun bittiği yeri (varsa ;) veya satır sonunu bulur, sonrasındaki açıklamaları atar.
+    match = re.search(r"(?i)(SELECT|WITH)\s+[\s\S]+?(?=;|(?:\n\s*\n)|$)", sql)
     if match:
-        s = match.group(1).strip()
-    s = re.sub(r"[ \t]+", " ", s).strip()
-    return s
+        sql = match.group(0)
 
+    # 4. Gereksiz boşlukları temizle
+    sql = " ".join(sql.split()).strip()
 
-def is_select_only(sql: str) -> bool:
-    s = (sql or "").strip().lower()
-    if not s.startswith("select"):
-        return False
-    blocked = ["insert","update","delete","drop","alter","create","truncate","merge","exec","execute","xp_","sp_"]
-    return not any(re.search(rf"\b{kw}\b", s) for kw in blocked)
+    # 5. Başlangıç kontrolü
+    if not sql.upper().startswith(ALLOWED_START):
+        raise ValueError("Only SELECT queries are allowed")
 
+    return sql
 
-def extract_stok_kod(text: str) -> str:
-    m = re.search(r"\bSTK-\d+\b", str(text or ""), re.IGNORECASE)
-    return m.group(0).upper() if m else ""
+# -------------------------------------------------- 
+# NODE 1 — LIST TABLES 
+# --------------------------------------------------
+def list_tables(state: State) -> dict:     
+    tables = list(db.get_usable_table_names())     
+    return {"tables": tables} 
 
-
-def extract_invoice_no(text: str) -> str:
-    """
-    Prefix bağımsız fatura no (alfanumerik segment destekli).
-    ÖNEMLİ: STK-xxx gördüysek fatura_no saymayız.
-    """
-    s = str(text or "")
-    if re.search(r"\bSTK-\d+\b", s, flags=re.IGNORECASE):
-        return ""
-    pattern = r"\b[A-Za-z0-9ÇĞİÖŞÜçğıöşü]{1,12}(?:-[A-Za-z0-9]{1,20}){1,4}\b"
-    m = re.search(pattern, s, flags=re.IGNORECASE)
-    return m.group(0).upper() if m else ""
-
-
-def sql_like_ci_ai(column: str, value: str) -> str:
-    value = value.replace("'", "''")
-    return f"{column} COLLATE {COLLATE} LIKE '%{value}%' COLLATE {COLLATE}"
-
-
-def try_format_date(val: Any) -> str:
-    if val is None:
-        return "-"
-    try:
-        if hasattr(val, "to_pydatetime"):
-            val = val.to_pydatetime()
-        if isinstance(val, datetime):
-            return val.strftime("%d.%m.%Y")
-        s = str(val)
-        s19 = s[:19]
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(s19, fmt)
-                return dt.strftime("%d.%m.%Y")
-            except Exception:
-                pass
-        return s
-    except Exception:
-        return str(val)
-
-
-def try_format_money(val: Any) -> str:
-    if val is None or val == "":
-        return "-"
-    try:
-        num = float(val)
-        s = f"{num:,.2f}"
-        s = s.replace(",", "X").replace(".", ",").replace("X", ".")
-        return f"{s} TL"
-    except Exception:
-        return f"{val} TL"
-
-
-def fmt_qty(val: Any) -> str:
-    try:
-        f = float(val)
-        return str(int(f)) if f.is_integer() else str(f)
-    except Exception:
-        return str(val)
-
-
-def normalize_percent(val: Any) -> str:
-    try:
-        f = float(val)
-        return str(int(f)) if f.is_integer() else str(f)
-    except Exception:
-        return str(val)
-
-
-def detect_target_field(q: str) -> str:
-    ql = (q or "").lower()
-    for field, keys in FIELD_SYNONYMS.items():
-        if any(k in ql for k in keys):
-            return field
-    return ""
-
-
-def extract_product_name(q: str) -> str:
-    """
-    Ürün adı yakalama (yazıcı, usb flash, monitor vs.)
-    """
-    s = (q or "").strip()
-
-    # "ürün adı X ..."
-    m = re.search(r"ürün adı\s+(.+?)(?:\s+olan|\s+ürün|\s+stok|\s+fiyat|\s+kdv|\s+tutar|\s+kaç|\s+kac|\?|$)",
-                  s, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-
-    # "X'in / Xun ... kdv/fiyat/stok/toplam/miktar"
-    m = re.search(r"(.+?)(?:'un|'ün|'ın|'in|un|ün|ın|in)\s+(?:kdv|fiyat|stok|toplam|miktar)\b",
-                  s, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-
-    # "X kdv oranı / X fiyatı / X toplamı / X kaç adet"
-    m = re.search(r"(.+?)\s+(?:kdv|kdv\s*oranı|kdv\s*orani|fiyatı|fiyati|stok\s*kodu|stok_kod|stokkod|toplamı|toplami|miktarı|miktari|kaç|kac)\b",
-                  s, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-
-    # "kaç tane X almışız" / "kaç adet X"
-    m = re.search(r"(?:kaç\s+tane|kac\s+tane|kaç\s+adet|kac\s+adet)\s+(.+?)(?:\s+almışız|\s+almisiz|\s+aldık|\s+aldik|\?|$)",
-                  s, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-
-    return ""
-
-
-def extract_company_name(q: str) -> str:
-    """
-    Basit cari adı çıkarma:
-    "C ticaret USB flash toplamı nedir" -> "C ticaret"
-    "B gıda şirketinin cari kodu" -> "B gıda"
-    """
-    s = (q or "").strip()
-
-    # "X şirketi/firması/ticaret" yakala
-    m = re.search(r"\b([A-Za-zÇĞİÖŞÜçğıöşü0-9 ]{1,40}?\b(?:ticaret|gıda|gida|kırtasiye|kirtasiye|ofis|market|sanayi|ltd|a\.ş|as|limited))\b",
-                  s, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-
-    # genel temizlik (fallback)
-    cleaned = re.sub(r"\b(şirketinin|sirketinin|şirketi|sirketi|firması|firmasi|cari kodu|cari kod|toplamı|toplami|nedir|ne|kaç|kac|adet|tutar|\?)\b",
-                     "", s, flags=re.IGNORECASE).strip()
-    # çok uzunsa alma
-    return cleaned if 1 <= len(cleaned) <= 40 else ""
-
-
-def detect_aggregate_intent(q: str) -> Optional[str]:
-    """
-    Aggregate niyeti:
-    - "kaç tane / kaç adet" => sum_miktar
-    - "toplamı nedir" + (firma/ürün) => sum_toplam
-    """
-    ql = (q or "").lower()
-    if ("kaç tane" in ql) or ("kac tane" in ql) or ("kaç adet" in ql) or ("kac adet" in ql):
-        return "sum_miktar"
-    if ("toplamı" in ql) or ("toplami" in ql) or ("genel toplam" in ql) or ("tutar" in ql):
-        return "sum_toplam"
-    return None
-
-
-def bullet_row_all_columns(row: dict) -> str:
-    def fmt_value(col: str, v: Any) -> str:
-        if v is None or str(v).strip() == "":
-            return "-"
-        if col in ("birim_fiyat", "toplam"):
-            return try_format_money(v)
-        if col in ("fiili_tarih", "urun_tarihi"):
-            return try_format_date(v)
-        if col == "miktar":
-            return f"{fmt_qty(v)} adet"
-        if col == "kdv_orani":
-            return f"{normalize_percent(v)}%"
-        return str(v)
-
-    return "\n".join([f"- **{FIELD_LABELS.get(col, col)}:** {fmt_value(col, row.get(col))}" for col in COLUMNS])
-
-
-def single_field_answer(field: str, row: dict, q: str) -> str:
-    inv = extract_invoice_no(q)
-
-    # aggregate alias’ları
-    if "agg_value" in row:
-        agg = row.get("agg_value")
-        if agg is None:
-            return "Sonuç bulunamadı."
-        # miktar mı toplam mı anlayalım
-        if "kaç" in q.lower() or "adet" in q.lower() or "tane" in q.lower():
-            prod = extract_product_name(q)
-            return f"{prod} için toplam miktar: {fmt_qty(agg)} adet" if prod else f"Toplam miktar: {fmt_qty(agg)} adet"
-        else:
-            comp = extract_company_name(q)
-            prod = extract_product_name(q)
-            if comp and prod:
-                return f"{comp} - {prod} toplamı: {try_format_money(agg)}"
-            if prod:
-                return f"{prod} toplamı: {try_format_money(agg)}"
-            if comp:
-                return f"{comp} toplamı: {try_format_money(agg)}"
-            return f"Toplam: {try_format_money(agg)}"
-
-    val = row.get(field, None)
-    if field in ("birim_fiyat", "toplam"):
-        val_fmt = try_format_money(val)
-    elif field in ("fiili_tarih", "urun_tarihi"):
-        val_fmt = try_format_date(val)
-    elif field == "miktar":
-        val_fmt = f"{fmt_qty(val)} adet"
-    elif field == "kdv_orani":
-        val_fmt = f"{normalize_percent(val)}%"
-    else:
-        val_fmt = "-" if val is None else str(val).strip()
-
-    if field == "kdv_orani":
-        if inv:
-            return f"{inv} faturanın KDV oranı: {val_fmt}"
-        prod = (row.get("urun_adi") or "").strip() or extract_product_name(q)
-        return f"{prod} ürününün KDV oranı: {val_fmt}" if prod else f"KDV oranı: {val_fmt}"
-
-    if field == "urun_adi" and inv:
-        return f"{inv} faturadaki ürün: {(row.get('urun_adi') or '-').strip()}"
-
-    label = FIELD_LABELS.get(field, field)
-    return f"{label}: {val_fmt}"
-
-
-# ---------------- NODES ----------------
-def list_tables(state: State) -> dict:
-    return {"tables": [TABLE]}
-
-
+# -------------------------------------------------- 
+# NODE 2 — GET SCHEMA 
+# -------------------------------------------------- 
 def get_schema(state: State) -> dict:
-    return {"schema": get_manual_schema()}
 
+    df = run_query("""
+        SELECT 
+            c.name AS column_name,
+            ty.name AS data_type,
+            c.max_length,
+            c.is_nullable
+        FROM sys.columns c
+        JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+        WHERE c.object_id = OBJECT_ID('FaturaDetay')
+        ORDER BY c.column_id
+    """)
 
-def generate_sql(state: State) -> dict:
-    q = state["question"]
-    ql = q.lower()
+    schema_text = "Table: FaturaDetay\nColumns:\n"
 
-    target_field = detect_target_field(q)
+    for _, row in df.iterrows():
+        nullable = "NULL" if row["is_nullable"] else "NOT NULL"
+        schema_text += (
+            f"- {row['column_name']} "
+            f"({row['data_type']}, {nullable})\n"
+        )
 
-    # ✅ 1) STK önce (invoice regex karıştırmasın)
-    stk = extract_stok_kod(q)
-    if stk and (("hangi" in ql and ("ürün" in ql or "urun" in ql)) or target_field == "urun_adi"):
-        return {"sql": f"SELECT TOP 1 stok_kod, urun_adi FROM {TABLE} WHERE stok_kod = '{stk}'", "error": ""}
+    return {"schema": schema_text}
 
-    # ✅ 2) Fatura no + hedef alan (kdv/toplam/ürün vs.) => tek alan seç
-    inv = extract_invoice_no(q)
-    if inv:
-        if target_field and target_field != "fatura_no":
-            return {
-                "sql": (
-                    f"SELECT TOP 1 fatura_no, {target_field}, urun_adi, stok_kod, cari_ad, cari_kod "
-                    f"FROM {TABLE} WHERE fatura_no = '{inv}'"
-                ),
-                "error": ""
-            }
-        return {"sql": f"SELECT * FROM {TABLE} WHERE fatura_no = '{inv}'", "error": ""}
+"""
+def get_schema(state: State) -> dict:
 
-    # ✅ 3) Aggregate soruları (kaç adet / toplam tutar)
-    agg = detect_aggregate_intent(q)
-    if agg:
-        product = extract_product_name(q)
-        company = extract_company_name(q)
-
-        # Kaç adet? => SUM(miktar)
-        if agg == "sum_miktar":
-            if not product and stk:
-                return {"sql": f"SELECT SUM(miktar) AS agg_value FROM {TABLE} WHERE stok_kod = '{stk}'", "error": ""}
-            if product:
-                where = sql_like_ci_ai("urun_adi", product)
-                return {"sql": f"SELECT SUM(miktar) AS agg_value FROM {TABLE} WHERE {where}", "error": ""}
-            # ürün adı yoksa sor
-            return {"sql": "", "error": "Hangi ürün? Örn: 'yazıcı kaç adet almışız?' veya 'USB flash kaç tane almışız?'"}
-
-        # Toplam? => SUM(toplam) (firma + ürün)
-        if agg == "sum_toplam":
-            filters = []
-            if company:
-                filters.append(sql_like_ci_ai("cari_ad", company))
-            if product:
-                filters.append(sql_like_ci_ai("urun_adi", product))
-            if stk:
-                filters.append(f"stok_kod = '{stk}'")
-
-            if filters:
-                where = " AND ".join(filters)
-                return {"sql": f"SELECT SUM(toplam) AS agg_value FROM {TABLE} WHERE {where}", "error": ""}
-
-            return {"sql": "", "error": "Hangi firma veya hangi ürün? Örn: 'C ticaret USB flash toplamı nedir?'"}
-
-    # ✅ 4) Tek alan soruları (ürün bazlı)
-    if target_field:
-        product = extract_product_name(q)
-        company = extract_company_name(q)
-
-        if stk:
-            return {"sql": f"SELECT TOP 1 stok_kod, urun_adi, {target_field} FROM {TABLE} WHERE stok_kod = '{stk}'", "error": ""}
-
-        if product:
-            where = sql_like_ci_ai("urun_adi", product)
-            return {"sql": f"SELECT TOP 1 urun_adi, {target_field} FROM {TABLE} WHERE {where}", "error": ""}
-
-        if company and target_field in ("cari_kod", "cari_ad"):
-            where = sql_like_ci_ai("cari_ad", company)
-            return {"sql": f"SELECT TOP 1 cari_ad, {target_field} FROM {TABLE} WHERE {where}", "error": ""}
-
-        return {
-            "sql": "",
-            "error": "Hangi ürün / stok kod / fatura no? Örn: 'monitor kdv oranı kaçtır?' veya 'STK-059 hangi ürün?' veya 'FT-445669 kdv oranı nedir?'",
-        }
-
-    # ✅ 5) Diğerleri -> LLM (sadece SQL üretir)
-    system_prompt = f"""
-Sen bir MSSQL uzmanısın. SADECE SELECT sorgusu yaz.
-
-KURALLAR:
-- Sadece şu tabloyu kullan: {TABLE}
-- Sadece şu sütunları kullan: {", ".join(COLUMNS)}
-- İsim aramalarında LIKE '%...%' kullan.
-- "en son" -> ORDER BY fiili_tarih DESC
-- Açıklama yok, markdown yok, sadece SQL döndür.
-""".strip()
-
-    prompt = ChatPromptTemplate.from_messages(
-        [("system", system_prompt), ("human", "Soru: {question}\nŞema: {schema}")]
+    columns_df = run_query(
+        SELECT 
+            t.name AS table_name,
+            c.name AS column_name,
+            ty.name AS data_type
+        FROM sys.tables t
+        JOIN sys.columns c ON t.object_id = c.object_id
+        JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+        ORDER BY t.name, c.column_id
     )
-    formatted = prompt.invoke({"question": q, "schema": state["schema"]})
+
+    fk_df = run_query(
+        SELECT 
+            tp.name AS parent_table,
+            cp.name AS parent_column,
+            tr.name AS ref_table,
+            cr.name AS ref_column
+        FROM sys.foreign_keys fk
+        JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+        JOIN sys.tables tp ON fkc.parent_object_id = tp.object_id
+        JOIN sys.columns cp ON fkc.parent_object_id = cp.object_id 
+                             AND fkc.parent_column_id = cp.column_id
+        JOIN sys.tables tr ON fkc.referenced_object_id = tr.object_id
+        JOIN sys.columns cr ON fkc.referenced_object_id = cr.object_id 
+                             AND fkc.referenced_column_id = cr.column_id
+    )
+
+    schema_dict = {}
+
+    for _, row in columns_df.iterrows():
+        table = row["table_name"]
+        column = row["column_name"]
+        dtype = row["data_type"]
+
+        if table not in schema_dict:
+            schema_dict[table] = {
+                "columns": [],
+                "foreign_keys": []
+            }
+
+        schema_dict[table]["columns"].append(
+            f"{column} ({dtype})"
+        )
+
+    for _, row in fk_df.iterrows():
+        parent = row["parent_table"]
+        relation = (
+            f"{row['parent_column']} -> "
+            f"{row['ref_table']}.{row['ref_column']}"
+        )
+        if parent in schema_dict:
+            schema_dict[parent]["foreign_keys"].append(relation)
+
+    # LLM'e verilecek temiz string
+    schema_text = ""
+
+    for table, info in schema_dict.items():
+        schema_text += f"\nTable: {table}\n"
+        schema_text += "Columns:\n"
+        for col in info["columns"]:
+            schema_text += f"- {col}\n"
+
+        if info["foreign_keys"]:
+            schema_text += "Foreign Keys:\n"
+            for fk in info["foreign_keys"]:
+                schema_text += f"- {fk}\n"
+
+    return {"schema": schema_text}
+"""
+
+# -------------------------------------------------- 
+# NODE 3 — GENERATE SQL 
+# -------------------------------------------------- 
+def generate_sql(state: State) -> dict:
+    # 3 kimliği birleştiren, ama çıktı olarak sadece kod isteyen katı ve detaylı Türkçe prompt
+    system_prompt = f"""
+        Sen bu şirketin her şeyi bilen akıllı ERP Asistanı, Kurumsal Şirket Asistanı ve aynı zamanda yardımcı bir Chatbot'usun. 
+        Şu anki görevin: Kullanıcının niyetini (bir şirket sorusu mu, bir ERP rapor talebi mi, yoksa genel bir sohbet mi olduğunu) anlamak ve bu talebi karşılayacak kusursuz bir Microsoft SQL Server (T-SQL) sorgusu üretmektir.
+
+        SADECE aşağıdaki veritabanı şemasını kullanacaksın:
+        -----------------------------------------
+        {state['schema']}
+        -----------------------------------------
+
+        KATI KURALLAR (Bunları ihlal edemezsin):
+        1. Yalnızca yukarıdaki şemada açıkça belirtilen tablo ve sütunları kullan. Olmayan bir tabloyu veya sütunu asla hayal etme.
+        2. Eğer kullanıcının sorusu veya sohbeti bu şemadaki verilerle KESİNLİKLE cevaplanamıyorsa, hiçbir sorgu üretme ve sadece şu metni döndür: invalid_schema_reference
+        3. Limitleme yapmak için LIMIT kelimesini KULLANMA. Bunun yerine T-SQL kuralı olan TOP kelimesini kullan (Örn: SELECT TOP 10...).
+        4. Veritabanını korumak zorundasın. ASLA INSERT, UPDATE, DELETE, DROP, ALTER gibi veriyi değiştiren komutlar yazma. Sadece SELECT kullan.
+        5. ASLA 'SELECT *' kullanma. Soruyu cevaplamak için hangi sütunlar gerekliyse onları açıkça yaz.
+        6. Sen bir asistansın ama şu an kod yazma modundasın. SADECE SQL sorgusunu döndür. Kesinlikle "Merhaba", "İşte sorgunuz", "Tabii ki" gibi açıklamalar, yorumlar veya ek metinler yazma. Sadece saf SQL.
+
+        Kullanıcının dilini ve niyetini anla, ardından ona uygun SQL'i ver.
+        """.strip()
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "{question}")
+    ])
+    print(state["schema"])
+    formatted = prompt.invoke({
+        "question": state["question"]
+    })
+
     raw_sql = llm.invoke(formatted).content
-    return {"sql": clean_sql(raw_sql), "error": ""}
+    print("RAW SQL:", raw_sql)
 
+    sql = clean_sql(raw_sql)
+    print("CLEAN SQL:", sql)
 
-def check_sql(state: State) -> dict:
-    if state.get("error"):
-        return {"error": state["error"]}
+    sql = enforce_limit(sql)
+    print("FINAL SQL:", sql)
 
-    sql = state.get("sql", "")
-    if not sql:
-        return {"error": "Boş SQL üretildi."}
+    return {"sql": sql}
 
-    if not is_select_only(sql):
-        return {"error": "Güvenlik nedeniyle sadece SELECT sorgularına izin veriliyor."}
+# -------------------------------------------------- 
+# NODE 4 — CHECK SQL 
+# -------------------------------------------------- 
+def check_sql(state: State) -> dict:     
+    sql = state["sql"]     
+    if sql.strip().lower() == "invalid_schema_reference":         
+        return {"error": "invalid_schema_reference"}     
+    
+    if not is_single_select(sql):         
+        return {"error": "only_single_select_allowed"}     
+    
+    bad = has_forbidden(sql)     
+    if bad:         
+        return {"error": "forbidden_keyword", "metadata": {"keyword": bad}}     
+    
+    if has_select_star(sql):         
+        return {"error": "select_star_not_allowed"}     
+    
+    return {"error": ""} 
 
-    return {"error": ""}
+def enforce_limit(sql: str):
 
+    if "TOP" not in sql.upper():
+        sql = sql.replace("SELECT", "SELECT TOP 50", 1)
 
-def execute_sql(state: State) -> dict:
-    if state.get("error"):
-        return {"data": [], "row_count": 0, "error": state["error"]}
+    return sql
 
-    try:
-        print(f"--- ÇALIŞTIRILAN SQL: {state['sql']} ---")
-        df = run_query(state["sql"])
-        if df is None or df.empty:
-            return {"data": [], "row_count": 0, "error": ""}
-        data_list = df.to_dict(orient="records")
-        return {"data": data_list, "row_count": len(data_list), "error": ""}
-    except Exception as e:
-        return {"error": f"SQL çalıştırma hatası: {e}", "data": [], "row_count": 0}
+def has_forbidden(sql: str) -> Optional[str]:     
+    forbidden = sql_guard.forbidden     
+    sql_upper = sql.upper()     
+    for word in forbidden:         
+        if re.search(rf"\b{word}\b", sql_upper):             
+            return word     
+        
+    return None 
+    
+def is_single_select(sql: str) -> bool:     
+    sql_upper = sql.strip().upper()     
+    if not sql_upper.startswith("SELECT"):         
+        return False     
+    # basit bir kontrol: sadece bir "SELECT" olmalı     
+    if sql_upper.count("SELECT") > 1:         
+        return False     
+    return True 
 
+def has_select_star(sql: str) -> bool:     
+    return bool(
+        re.search(r"SELECT\s+\*", sql, flags=re.IGNORECASE)) 
 
-def summarize(state: State) -> dict:
-    if state.get("error"):
-        return {"summary": f"Hata: {state['error']}"}
+# -------------------------------------------------- 
+# NODE 5 — EXECUTE 
+# -------------------------------------------------- 
+def execute_sql(state: State) -> dict:     
+    ctx = ToolContext(         
+        user_id="u1",         
+        conversation_id="c1",         
+        request_id="r1", )     
+    
+    args = RunSqlToolArgs(sql=state["sql"])     
+    result = sql_guard.execute(ctx, args)     
 
-    if not state.get("data"):
-        return {"summary": "Aradığınız kriterlere uygun bir kayıt bulunamadı."}
+    if not result.success:         
+        return {             
+            "error": result.result_for_llm,             
+            "data": [],             
+            "row_count": 0             
+            }         
+        
+    data = result.metadata.get("data", []) if result.metadata else []     
+    row_count = result.metadata.get("row_count", 0) if result.metadata else 0
 
-    q = state.get("question", "")
-    rows = state["data"]
+    return {         
+        "data": data,         
+        "row_count": row_count,         
+        "error": "",     
+        } 
+        
 
-    inv = extract_invoice_no(q)
-    field = detect_target_field(q)
+# -------------------------------------------------- 
+# NODE 6 — SUMMARIZE 
+# -------------------------------------------------- 
+def summarize(state: State) -> dict:     
+    if state.get("error"):         
+        return {"summary": f"SQL execution failed with error:{state['error']}"}         
+        
+    if state.get("row_count", 0) == 0:         
+        return {"summary": "Query executed successfully but returned no results."}         
+    
+    system_prompt = """
+        Sen bir ERP raporlama asistanısın.
 
-    # ✅ fatura + hedef alan => tek cümle
-    if inv and field and field != "fatura_no":
-        return {"summary": single_field_answer(field, rows[0], q)}
+        Kullanıcının sorusuna SQL sonucu üzerinden cevap ver.
 
-    # ✅ aggregate sonuç => tek cümle (agg_value)
-    if "agg_value" in rows[0]:
-        return {"summary": single_field_answer("agg_value", rows[0], q)}
+        Kurallar:
+        - Cevap Türkçe olmalı
+        - Madde madde yaz
+        - Gereksiz açıklama yapma
+        - Veri dışında yorum yapma
+        - Para birimini belirt
+        - Net ve profesyonel ol
+        - Her bilgi ayrı satırda olmalı.
+        - Her satır '• ' ile başlamalı.
+        - Asla paragraf yazma.
+        - Veri dışında yorum yapma.
+        - Sadece mevcut alanları kullan.
+        - Para birimini belirt.
+        - Eğer soru tek bir kayıt istiyorsa SELECT TOP 1 kullan.
+        ÖNEMLİ:
+        - C0xx gibi değerler cari_kod alanına aittir.
+        - FT-xxxx değerleri fatura_no alanına aittir.
+        - STK-xxx değerleri stok_kod alanına aittir.
+    """.strip()     
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt), 
+        ("human", "Question: {question}\nData: {data}")
+        ])     
+    
+    formatted = prompt.invoke({
+        "question": state["question"],         
+        "data": str(state["data"])     
+        })     
+    
+    summary = llm.invoke(formatted).content   
+    return {"summary": summary} 
 
-    # ✅ fatura detayı => full liste
-    if inv:
-        header = f"**{inv}** için {len(rows)} satır bulundu."
-        blocks = []
-        for i, r in enumerate(rows[:5], start=1):
-            blocks.append(f"**Kayıt {i}:**\n{bullet_row_all_columns(r)}")
-        more = f"\n\n(İlk 5 kayıt gösterildi. Toplam: {len(rows)})" if len(rows) > 5 else ""
-        return {"summary": header + "\n\n" + "\n\n".join(blocks) + more}
-
-    # ✅ tek alan sorusu => tek cümle
-    if field:
-        return {"summary": single_field_answer(field, rows[0], q)}
-
-    # ✅ genel liste
-    header = f"{len(rows)} kayıt bulundu."
-    blocks = []
-    for i, r in enumerate(rows[:5], start=1):
-        blocks.append(f"**Kayıt {i}:**\n{bullet_row_all_columns(r)}")
-    more = f"\n\n(İlk 5 kayıt gösterildi. Toplam: {len(rows)})" if len(rows) > 5 else ""
-    return {"summary": header + "\n\n" + "\n\n".join(blocks) + more}
-
-
-# ---------------- GRAPH ----------------
+# -------------------------------------------------- 
+# GRAPH BUILD 
+# -------------------------------------------------- 
 def build_graph():
     graph = StateGraph(State)
+
     graph.add_node("list_tables", list_tables)
     graph.add_node("get_schema", get_schema)
     graph.add_node("generate_sql", generate_sql)
@@ -509,22 +373,33 @@ def build_graph():
     graph.add_edge("check_sql", "execute_sql")
     graph.add_edge("execute_sql", "summarize")
     graph.add_edge("summarize", END)
+
     return graph.compile()
 
+_app = build_graph() 
 
-app = build_graph()
-
-
-def run_ai_engine(question: str) -> dict:
-    initial_state: State = {
-        "question": question,
-        "tables": [],
-        "schema": "",
-        "sql": "",
-        "data": [],
-        "row_count": 0,
-        "error": "",
-        "tries": 0,
-        "summary": "",
-    }
-    return app.invoke(initial_state)
+def run_ai_engine(question: str) -> FinalOutput:     
+    initial_state: State = {         
+        "question": question,         
+        "tables": [],         
+        "schema": "",         
+        "sql": "",         
+        "data": [],         
+        "row_count": 0,         
+        "error": "",         
+        "tries": 0,         
+        "summary": {},     
+        }     
+    
+    final_state = _app.invoke(initial_state)     
+    
+    output: FinalOutput = {         
+        "success": not bool(final_state.get("error")),         
+        "question": question,         
+        "sql": final_state.get("sql", ""),         
+        "row_count": final_state.get("row_count", 0),         
+        "data": final_state.get("data", []),         
+        "summary": final_state.get("summary", ""),     
+        }
+    
+    return output

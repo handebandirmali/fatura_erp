@@ -1,63 +1,211 @@
-import json
-import re
-from langchain_ollama import ChatOllama
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from ai.router import route_question
+"""
+ERP AI Assistant
+SQL engine + session history + semantic memory
+"""
 
-def classify_intent(prompt: str) -> str:
-    """Kullanıcının veritabanı mı yoksa sohbet mi istediğini anlar."""
-    p = (prompt or "").lower().strip()
-    
-    # SQL Tetikleyicileri
-    sql_keywords = ["fatura", "no", "tarih", "kaç", "toplam", "getir", "listele", "ürün", "stok", "cari", "tutar", "bakiye", "şirket"]
-    
-    # Gelişmiş Regex: FT-123456 veya C001 veya STK-001 gibi kodları yakalar
-    code_pattern = r'(?i)(ft-\d+|c\d{3,}|stk-\d+)'
-    
-    if any(k in p for k in sql_keywords) or bool(re.search(code_pattern, p)):
-        return "sql"
-    return "chat"
+import json
+import asyncio
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.callbacks import BaseCallbackHandler
+
+from ai.memory.chromadb_memory import ChromaAgentMemory
+from ai.tools.model import ToolContext
+
+from ai.run_sql_tool.sql_runner import run_ai_engine
+from connection_db.connection import llm_run
+
+
+memory = ChromaAgentMemory()
+
+
+class StreamlitHandler(BaseCallbackHandler):
+
+    def __init__(self, placeholder):
+        self.placeholder = placeholder
+        self.final_text = ""
+
+    def on_llm_new_token(self, token: str, **kwargs: Any):
+
+        self.final_text += token
+
+        bubble_html = f"""
+        <div class="chat-container">
+            <div class="bubble bot-bubble">
+                🐔 {self.final_text}
+            </div>
+        </div>
+        """
+
+        self.placeholder.markdown(bubble_html, unsafe_allow_html=True)
+
 
 def run_ai(prompt: str, subset_df, chat_history, placeholder):
-    intent = classify_intent(prompt)
-    # temperature=0: Halüsinasyonu minimize eder
-    llm = ChatOllama(model="llama3.2:3b", temperature=0)
+
+    context = ToolContext(
+        user_id="u1",
+        conversation_id="c1",
+        request_id="r1",
+    )
+
+    # -----------------------------
+    # SQL ENGINE ÇALIŞTIR
+    # -----------------------------
+
+    sql_result = run_ai_engine(prompt)
+
+    sql_summary = sql_result["summary"]
+    sql_data = sql_result["data"]
+
+    # -----------------------------
+    # SYSTEM PROMPT
+    # -----------------------------
+
+    system_content = """
+        Sen bir ERP uzmanı asistansın.
+
+        SQL motorundan gelen veriyi kullanarak cevap ver.
+
+        Kurallar:
+        - Cevap Türkçe olmalı
+        - Madde madde yaz
+        - Veri dışında yorum yapma
+        - Kısa ve net yaz
+        - Her satır '• ' ile başlasın
+    """
+
+    messages = [SystemMessage(content=system_content)]
+
+    # -------------------------------------------------
+    # SESSION HISTORY
+    # -------------------------------------------------
+
+    if chat_history:
+
+        for ch in chat_history[-5:]:
+
+            if ch["role"] == "assistant":
+                messages.append(AIMessage(content=ch["message"]))
+            else:
+                messages.append(HumanMessage(content=ch["message"]))
+
+    # -------------------------------------------------
+    # SEMANTIC MEMORY
+    # -------------------------------------------------
+
+    else:
+
+        try:
+
+            similar_memories = asyncio.run(
+                memory.search_text_memories(
+                    query=prompt,
+                    context=context,
+                    limit=5,
+                    similarity_threshold=0.6,
+                )
+            )
+
+        except RuntimeError:
+
+            loop = asyncio.get_event_loop()
+
+            similar_memories = loop.run_until_complete(
+                memory.search_text_memories(
+                    query=prompt,
+                    context=context,
+                    limit=5,
+                    similarity_threshold=0.6,
+                )
+            )
+
+        if similar_memories:
+
+            similar_memories = sorted(
+                similar_memories,
+                key=lambda x: x.similarity_score,
+                reverse=True
+            )
+
+            best_score = similar_memories[0].similarity_score
+
+            if best_score >= 0.75:
+
+                for result in similar_memories[:2]:
+
+                    try:
+
+                        data = json.loads(result.memory.content)
+
+                        messages.append(HumanMessage(content=data["user"]))
+                        messages.append(AIMessage(content=data["assistant"]))
+
+                    except Exception:
+                        continue
+
+    # -------------------------------------------------
+    # SQL RESULT CONTEXT
+    # -------------------------------------------------
+
+    if sql_data:
+
+        sql_context = json.dumps(sql_data[:10], ensure_ascii=False)
+
+        messages.append(SystemMessage(content=f"""
+        SQL sonucu bulundu.
+
+        SQL DATA:
+        {sql_context}
+        """))
+
+    else:
+
+        messages.append(SystemMessage(content=sql_summary))
+
+    # -------------------------------------------------
+    # USER QUESTION
+    # -------------------------------------------------
+
+    messages.append(HumanMessage(content=prompt))
+
+    # -------------------------------------------------
+    # LLM
+    # -------------------------------------------------
+
+    stream_handler = StreamlitHandler(placeholder)
+
+    llm = llm_run()
+
+    response = llm.invoke(messages)
+
+    # -------------------------------------------------
+    # MEMORY SAVE
+    # -------------------------------------------------
+
+    memory_payload = json.dumps({
+        "user": prompt,
+        "assistant": response.content
+    })
 
     try:
-        if intent == "sql":
-            # SQL Modu talimatlarını tek bir tabloda (FaturaDetay) topluyoruz
-            messages = [
-                SystemMessage(content=(
-                    "Sen bir MSSQL uzmanısın. Görevin sadece SELECT sorgusu yazmaktır. "
-                    "Veritabanında sadece 'FaturaDetay' tablosu mevcuttur. "
-                    "Kullanıcı bir kod verirse bunu fatura_no, cari_kod veya stok_kod sütunlarında ara. "
-                    "Asla açıklama yapma, sadece kodu döndür."
-                )),
-                HumanMessage(content=prompt)
-            ]
-            response_content = route_question(prompt, messages, llm)
-        else:
-            # Chat Modu: Sınırlı yerel veri (subset_df) kullanımı
-            context_table = subset_df.head(15).to_json(orient="records", force_ascii=False)
-            system_content = (
-                f"Sen ERP uzmanı GıtGıt'sın. Sadece şu tablo verilerine dayanarak cevap ver: {context_table}. "
-                "Eğer aranan bilgi bu 15 satırlık tabloda yoksa veya spesifik bir fatura/cari kodu "
-                "soruluyorsa, 'Bu bilgi için veritabanını sorgulamam gerekiyor, lütfen sorunuzu netleştirin' de."
+
+        asyncio.run(
+            memory.save_text_memory(
+                content=memory_payload,
+                context=context,
             )
-            messages = [SystemMessage(content=system_content)]
-            
-            # Geçmişi ekle
-            for ch in chat_history[-3:]:
-                role = AIMessage if ch["role"] == "assistant" else HumanMessage
-                messages.append(role(content=ch["content"]))
-            
-            messages.append(HumanMessage(content=prompt))
-            
-            res = llm.invoke(messages)
-            response_content = res.content if hasattr(res, 'content') else str(res)
+        )
 
-    except Exception as e:
-        print(f"--- ASSISTANT HATASI: {e} ---")
-        response_content = "Üzgünüm, şu an isteğinizi işleyemiyorum. Lütfen teknik birimle iletişime geçin."
+    except RuntimeError:
 
-    return response_content
+        loop = asyncio.get_event_loop()
+
+        loop.run_until_complete(
+            memory.save_text_memory(
+                content=memory_payload,
+                context=context,
+            )
+        )
+
+    return response.content

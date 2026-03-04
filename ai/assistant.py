@@ -83,7 +83,7 @@ def run_ai(prompt: str, subset_df, chat_history, placeholder):
 
     if chat_history:
 
-        for ch in chat_history[-5:]:
+        for ch in chat_history[-10:]:
 
             if ch["role"] == "assistant":
                 messages.append(AIMessage(content=ch["message"]))
@@ -150,7 +150,7 @@ def run_ai(prompt: str, subset_df, chat_history, placeholder):
 
     if sql_data:
 
-        sql_context = json.dumps(sql_data[:10], ensure_ascii=False)
+        sql_context = json.dumps(sql_data[:3], ensure_ascii=False,default=str)
 
         messages.append(SystemMessage(content=f"""
         SQL sonucu bulundu.

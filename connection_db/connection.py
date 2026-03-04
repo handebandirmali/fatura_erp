@@ -34,6 +34,6 @@ def run_uri():
 
 def llm_run():
     return ChatOllama(
-    model="llama3.2:3b",
+    model="llama3:8b",
     temperature=0,
 )

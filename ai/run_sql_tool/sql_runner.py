@@ -3,8 +3,9 @@ sql execute json doner
 db baglantisini kullanilir 
 """ 
 
+import json 
 import re 
-from typing import Optional 
+from typing import Any, Optional 
 from langgraph.graph import END, START, StateGraph 
 from langchain_core.prompts import ChatPromptTemplate 
 from typing_extensions import TypedDict 

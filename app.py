@@ -1,7 +1,7 @@
 import streamlit as st
 from ui.fatura_view import render_fatura_page, render_irsaliye_page
 from ui.fatura_upload_view import render_fatura_yukleme_page
-
+from ui.tahmin_view import render_tahmin_page
 # ================= PAGE CONFIG =================
 # Wide mode sayesinde yaptığımız o geniş fatura tasarımı tam ekran görünecek
 st.set_page_config(
@@ -21,11 +21,11 @@ st.markdown("""
 with st.sidebar:
     st.title("🚀 ERP Panel")
     
-    selected_module = st.radio(
-        "Modül Seçiniz:", 
-        ["📄 E-Fatura", "🚚 E-İrsaliye", "📤 Fatura Yükleme"],
-        index=0
-    )
+    selected_module = st.sidebar.radio(
+    "Modül Seçiniz:", 
+    ["📄 E-Fatura", "🚚 E-İrsaliye", "📤 Yükleme", "🔮 Tahmin"], # Tahmin eklendi
+    index=0
+)
 
 # ================= ROUTING (YÖNLENDİRME) =================
 # Seçilen modüle göre ilgili sayfayı çağırıyoruz
@@ -33,5 +33,8 @@ if selected_module == "📄 E-Fatura":
     render_fatura_page()
 elif selected_module == "🚚 E-İrsaliye":
     render_irsaliye_page()
-elif selected_module == "📤 Fatura Yükleme":
+elif selected_module == "📤 Yükleme":
     render_fatura_yukleme_page()
+elif selected_module == "🔮 Tahmin": # Yeni yönlendirme
+    render_tahmin_page()
+    

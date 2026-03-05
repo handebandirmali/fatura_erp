@@ -27,7 +27,7 @@ def run_query(sql: str):
 
 def run_uri():
     return SQLDatabase.from_uri(
-    "mssql+pyodbc://localhost\\SQLEXPRESS/FaturaDB"
+    "mssql+pyodbc://./FaturaDB"
     "?driver=ODBC+Driver+17+for+SQL+Server"
     "&trusted_connection=yes"
 )

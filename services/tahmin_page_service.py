@@ -1,5 +1,6 @@
 import pandas as pd
 from connection_db.connection import get_connection
+from services.xml_reader import parse_invoice_xml
 
 
 class TahminPageService:
@@ -18,7 +19,7 @@ class TahminPageService:
                 [urun_tarihi],
                 [fiili_tarih],
                 ISNULL([benzerlik_orani], 0) as [benzerlik_orani],
-                [xml_ubl],
+                CAST([xml_ubl] AS NVARCHAR(MAX)) as [xml_ubl],
                 ISNULL([miktar], 0) as [miktar],
                 ISNULL([birim_fiyat], 0) as [birim_fiyat],
                 ISNULL([kdv_orani], 0) as [kdv_orani],
@@ -30,29 +31,91 @@ class TahminPageService:
                 [beklenen_tarih],
                 [guncelleme_tarihi],
                 ISNULL([referans_fatura_no], '') as [referans_fatura_no],
-                ISNULL([tahmin_notu], '') as [tahmin_notu],
-                CAST(
-                    (ISNULL([miktar], 0) * ISNULL([birim_fiyat], 0) *
-                    (1 + ISNULL([kdv_orani], 0) / 100.0))
-                    AS DECIMAL(18,2)
-                ) as [Toplam]
+                ISNULL([tahmin_notu], '') as [tahmin_notu]
             FROM {self.TABLE_NAME}
             ORDER BY [beklenen_tarih] ASC, [guven_skoru] DESC, [urun_tarihi] DESC
             """
             df = pd.read_sql(query, conn)
-
-            if "tahmin_no" in df.columns:
-                df["tahmin_no"] = df["tahmin_no"].astype(str).str.strip()
-
-            if "stok_kod" in df.columns:
-                df["stok_kod"] = df["stok_kod"].astype(str).str.strip()
-
-            if "urun_adi" in df.columns:
-                df["urun_adi"] = df["urun_adi"].astype(str).str.strip()
-
-            return df
         finally:
             conn.close()
+
+        if df.empty:
+            return df
+
+        normalized_rows = []
+
+        for _, row in df.iterrows():
+            row_dict = row.to_dict()
+            xml_text = row_dict.get("xml_ubl")
+
+            base_row = {
+                "tahmin_no": str(row_dict.get("tahmin_no", "NO-YOK")).strip(),
+                "cari_kod": str(row_dict.get("cari_kod", "C-001")).strip(),
+                "cari_ad": str(row_dict.get("cari_ad", "Bilinmeyen Firma")).strip(),
+                "stok_kod": str(row_dict.get("stok_kod", "S-001")).strip(),
+                "urun_adi": str(row_dict.get("urun_adi", "Urun Bilgisi Yok")).strip(),
+                "urun_tarihi": row_dict.get("urun_tarihi"),
+                "fiili_tarih": row_dict.get("fiili_tarih"),
+                "benzerlik_orani": float(row_dict.get("benzerlik_orani", 0) or 0),
+                "xml_ubl": xml_text,
+                "miktar": float(row_dict.get("miktar", 0) or 0),
+                "birim_fiyat": float(row_dict.get("birim_fiyat", 0) or 0),
+                "kdv_orani": float(row_dict.get("kdv_orani", 0) or 0),
+                "tahmin_tipi": str(row_dict.get("tahmin_tipi", "") or ""),
+                "durum": str(row_dict.get("durum", "") or ""),
+                "guven_skoru": float(row_dict.get("guven_skoru", 0) or 0),
+                "periyot_gun": int(row_dict.get("periyot_gun", 0) or 0),
+                "son_alim_tarihi": row_dict.get("son_alim_tarihi"),
+                "beklenen_tarih": row_dict.get("beklenen_tarih"),
+                "guncelleme_tarihi": row_dict.get("guncelleme_tarihi"),
+                "referans_fatura_no": str(row_dict.get("referans_fatura_no", "") or ""),
+                "tahmin_notu": str(row_dict.get("tahmin_notu", "") or ""),
+            }
+
+            if xml_text and str(xml_text).strip():
+                try:
+                    parsed = parse_invoice_xml(xml_text)
+                    kalemler = parsed.get("kalemler", [])
+
+                    if kalemler:
+                        for kalem in kalemler:
+                            miktar = float(kalem.get("miktar", 0) or 0)
+                            birim_fiyat = float(kalem.get("birim_fiyat", 0) or 0)
+                            kdv_orani = float(kalem.get("kdv_orani", 0) or 0)
+
+                            new_row = base_row.copy()
+                            new_row["cari_kod"] = str(parsed.get("cari_kod", "")).strip() or new_row["cari_kod"]
+                            new_row["cari_ad"] = str(parsed.get("firma_adi", "")).strip() or new_row["cari_ad"]
+                            new_row["stok_kod"] = str(kalem.get("stok_kod", "")).strip() or new_row["stok_kod"]
+                            new_row["urun_adi"] = str(kalem.get("urun_adi", "")).strip() or new_row["urun_adi"]
+                            new_row["miktar"] = miktar
+                            new_row["birim_fiyat"] = birim_fiyat
+                            new_row["kdv_orani"] = kdv_orani
+                            new_row["Toplam"] = round(miktar * birim_fiyat * (1 + kdv_orani / 100.0), 2)
+                            normalized_rows.append(new_row)
+                        continue
+
+                except Exception:
+                    pass
+
+            base_row["Toplam"] = round(
+                base_row["miktar"] * base_row["birim_fiyat"] * (1 + base_row["kdv_orani"] / 100.0),
+                2
+            )
+            normalized_rows.append(base_row)
+
+        result_df = pd.DataFrame(normalized_rows)
+
+        if "tahmin_no" in result_df.columns:
+            result_df["tahmin_no"] = result_df["tahmin_no"].astype(str).str.strip()
+
+        if "stok_kod" in result_df.columns:
+            result_df["stok_kod"] = result_df["stok_kod"].astype(str).str.strip()
+
+        if "urun_adi" in result_df.columns:
+            result_df["urun_adi"] = result_df["urun_adi"].astype(str).str.strip()
+
+        return result_df
 
     def update_prediction_rows(
         self,

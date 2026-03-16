@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from connection_db.connection import get_connection
+from services.xml_reader import parse_invoice_xml
 
 
 class ExpectedInvoiceService:
@@ -11,22 +12,50 @@ class ExpectedInvoiceService:
         conn = get_connection()
         try:
             query = f"""
-            SELECT
-                ISNULL(fatura_no, '') AS fatura_no,
-                ISNULL(cari_kod, '') AS cari_kod,
-                ISNULL(cari_ad, '') AS cari_ad,
-                ISNULL(stok_kod, '') AS stok_kod,
-                ISNULL(urun_adi, '') AS urun_adi,
-                CAST(COALESCE(urun_tarihi, fiili_tarih) AS DATE) AS alim_tarihi,
-                ISNULL(miktar, 0) AS miktar,
-                ISNULL(birim_fiyat, 0) AS birim_fiyat,
-                ISNULL(kdv_orani, 0) AS kdv_orani
+            SELECT DISTINCT
+                CAST(xml_ubl AS NVARCHAR(MAX)) AS xml_ubl
             FROM {self.SOURCE_TABLE}
-            WHERE COALESCE(urun_tarihi, fiili_tarih) IS NOT NULL
+            WHERE xml_ubl IS NOT NULL
+              AND LTRIM(RTRIM(CAST(xml_ubl AS NVARCHAR(MAX)))) <> ''
             """
-            return pd.read_sql(query, conn)
+            df_xml = pd.read_sql(query, conn)
         finally:
             conn.close()
+
+        rows = []
+
+        for _, row in df_xml.iterrows():
+            xml_text = row.get("xml_ubl")
+            if not xml_text:
+                continue
+
+            try:
+                parsed = parse_invoice_xml(xml_text)
+            except Exception:
+                continue
+
+            fatura_no = str(parsed.get("fatura_no", "")).strip()
+            cari_kod = str(parsed.get("cari_kod", "")).strip()
+            cari_ad = str(parsed.get("firma_adi", "")).strip()
+            alim_tarihi = pd.to_datetime(parsed.get("tarih", None), errors="coerce")
+
+            if pd.isna(alim_tarihi):
+                continue
+
+            for kalem in parsed.get("kalemler", []):
+                rows.append({
+                    "fatura_no": fatura_no,
+                    "cari_kod": cari_kod,
+                    "cari_ad": cari_ad,
+                    "stok_kod": str(kalem.get("stok_kod", "")).strip(),
+                    "urun_adi": str(kalem.get("urun_adi", "")).strip(),
+                    "alim_tarihi": alim_tarihi.date(),
+                    "miktar": float(kalem.get("miktar", 0) or 0),
+                    "birim_fiyat": float(kalem.get("birim_fiyat", 0) or 0),
+                    "kdv_orani": float(kalem.get("kdv_orani", 0) or 0)
+                })
+
+        return pd.DataFrame(rows)
 
     def calculate_confidence(self, count: int, avg_gap: float, std_gap: float) -> int:
         score = 50
@@ -136,7 +165,11 @@ class ExpectedInvoiceService:
                 continue
 
             dates = grp["alim_tarihi"].tolist()
-            gaps = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates)) if (dates[i] - dates[i - 1]).days > 0]
+            gaps = [
+                (dates[i] - dates[i - 1]).days
+                for i in range(1, len(dates))
+                if (dates[i] - dates[i - 1]).days > 0
+            ]
 
             if not gaps:
                 continue

@@ -35,6 +35,7 @@ def database_xml_guncelle():
         query = """
         SELECT
             fatura_no,
+            cari_kod,
             stok_kod,
             cari_ad,
             urun_adi,
@@ -61,9 +62,10 @@ def database_xml_guncelle():
         print(f"{len(rows)} adet satır işleniyor...")
 
         for row in rows:
-            # --- 🧮 MALİ HESAPLAMALAR ---
-            f_no = row.fatura_no
-            s_kod = row.stok_kod
+            # --- MALİ HESAPLAMALAR ---
+            f_no = row.fatura_no if row.fatura_no is not None else ""
+            c_kod = row.cari_kod if row.cari_kod is not None else ""
+            s_kod = row.stok_kod if row.stok_kod is not None else ""
 
             miktar = _to_float(row.miktar, 0)
             fiyat = _to_float(row.birim_fiyat, 0)
@@ -84,21 +86,27 @@ def database_xml_guncelle():
             cari_ad = row.cari_ad if row.cari_ad is not None else ""
             urun_adi = row.urun_adi if row.urun_adi is not None else ""
 
-            # --- 🧾 XML OLUŞTURMA ---
+            # --- XML OLUŞTURMA ---
             invoice = ET.Element("Invoice", nsmap=ns)
 
             ET.SubElement(invoice, f"{{{CBC}}}ID").text = str(f_no)
             ET.SubElement(invoice, f"{{{CBC}}}UUID").text = str(uuid.uuid4())
             ET.SubElement(invoice, f"{{{CBC}}}IssueDate").text = tarih_str
-
             ET.SubElement(invoice, f"{{{CBC}}}InvoiceTypeCode").text = "SATIS"
             ET.SubElement(invoice, f"{{{CBC}}}DocumentCurrencyCode").text = "TRY"
 
+            # CUSTOMER
             cust_party = ET.SubElement(invoice, f"{{{CAC}}}AccountingCustomerParty")
             party = ET.SubElement(cust_party, f"{{{CAC}}}Party")
+
+            # cari_kod XML içine yazılıyor
+            party_ident = ET.SubElement(party, f"{{{CAC}}}PartyIdentification")
+            ET.SubElement(party_ident, f"{{{CBC}}}ID").text = str(c_kod)
+
             p_name = ET.SubElement(party, f"{{{CAC}}}PartyName")
             ET.SubElement(p_name, f"{{{CBC}}}Name").text = str(cari_ad)
 
+            # HEADER TAX
             tax_total = ET.SubElement(invoice, f"{{{CAC}}}TaxTotal")
             ET.SubElement(tax_total, f"{{{CBC}}}TaxAmount", currencyID="TRY").text = str(kdv_tutari)
 
@@ -111,12 +119,14 @@ def database_xml_guncelle():
             tax_scheme = ET.SubElement(tax_category, f"{{{CAC}}}TaxScheme")
             ET.SubElement(tax_scheme, f"{{{CBC}}}Name").text = "KDV"
 
+            # TOTALS
             legal_total = ET.SubElement(invoice, f"{{{CAC}}}LegalMonetaryTotal")
             ET.SubElement(legal_total, f"{{{CBC}}}LineExtensionAmount", currencyID="TRY").text = str(kdv_haric_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}TaxExclusiveAmount", currencyID="TRY").text = str(kdv_haric_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}TaxInclusiveAmount", currencyID="TRY").text = str(kdv_dahil_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}PayableAmount", currencyID="TRY").text = str(kdv_dahil_toplam)
 
+            # LINE
             line = ET.SubElement(invoice, f"{{{CAC}}}InvoiceLine")
             ET.SubElement(line, f"{{{CBC}}}ID").text = "1"
 
@@ -140,12 +150,16 @@ def database_xml_guncelle():
             item = ET.SubElement(line, f"{{{CAC}}}Item")
             ET.SubElement(item, f"{{{CBC}}}Name").text = str(urun_adi)
 
+            # stok_kod XML içine yazılıyor
+            sellers_item = ET.SubElement(item, f"{{{CAC}}}SellersItemIdentification")
+            ET.SubElement(sellers_item, f"{{{CBC}}}ID").text = str(s_kod)
+
             price = ET.SubElement(line, f"{{{CAC}}}Price")
             ET.SubElement(price, f"{{{CBC}}}PriceAmount", currencyID="TRY").text = str(fiyat)
 
             xml_string = ET.tostring(invoice, pretty_print=True, encoding="unicode")
 
-            # 4. DB Güncelleme (Toplam da eklendi)
+            # 4. DB Güncelleme
             update_query = """
             UPDATE [FaturaDB].[dbo].[FaturaDetay]
             SET [xml_ubl] = ?, [Toplam] = ?
@@ -154,7 +168,7 @@ def database_xml_guncelle():
             cursor.execute(update_query, (xml_string, kdv_dahil_toplam, f_no, s_kod))
 
         conn.commit()
-        print("İşlem tamamlandı. KDV ve Toplamlar eklendi.")
+        print("İşlem tamamlandı. XML alanları cari_kod ve stok_kod ile güncellendi.")
 
     except Exception as e:
         try:

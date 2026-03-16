@@ -8,7 +8,7 @@ import time
 def get_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost\\SQLEXPRESS;"
+        "SERVER=.;"
         "DATABASE=FaturaDB;"
         "Trusted_Connection=yes;"
     )
@@ -34,6 +34,6 @@ def run_uri():
 
 def llm_run():
     return ChatOllama(
-    model="llama3:8b",
+    model="llama3.2:3b",
     temperature=0,
 )

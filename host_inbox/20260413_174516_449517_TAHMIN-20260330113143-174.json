@@ -1,0 +1,22 @@
+{
+  "received_at": "2026-04-13 17:45:16",
+  "status": "ALINDI",
+  "source": "fatura_erp_prediction",
+  "payload": {
+    "fatura_no": "TAHMIN-20260330113143-174",
+    "cari_kod": "C014",
+    "firma_adi": "U GIDA",
+    "tarih": "2026-03-31",
+    "kalemler": [
+      {
+        "stok_kod": "STK-0102",
+        "urun_adi": "Kahve",
+        "miktar": 36.0,
+        "birim_fiyat": 2279.48,
+        "kdv_orani": 18.0
+      }
+    ],
+    "ara_toplam": 82061.28,
+    "genel_toplam": 96832.31039999999
+  }
+}

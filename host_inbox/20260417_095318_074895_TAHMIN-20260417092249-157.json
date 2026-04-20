@@ -1,0 +1,22 @@
+{
+  "received_at": "2026-04-17 09:53:18",
+  "status": "ALINDI",
+  "source": "fatura_erp_prediction",
+  "payload": {
+    "fatura_no": "TAHMIN-20260417092249-157",
+    "cari_kod": "C004",
+    "firma_adi": "E TEKNOLOJİ",
+    "tarih": "2026-04-18",
+    "kalemler": [
+      {
+        "stok_kod": "STK-0201",
+        "urun_adi": "Mouse",
+        "miktar": 15.0,
+        "birim_fiyat": 2426.67,
+        "kdv_orani": 20.0
+      }
+    ],
+    "ara_toplam": 36400.05,
+    "genel_toplam": 43680.060000000005
+  }
+}

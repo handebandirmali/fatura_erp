@@ -133,29 +133,28 @@ def parse_invoice_xml(xml_text: str) -> dict:
 
     for line in root.findall("cac:InvoiceLine", NS):
         urun_adi = _safe_text(line.find("cac:Item/cbc:Name", NS))
-
         stok_kod = _safe_text(
             line.find("cac:Item/cac:SellersItemIdentification/cbc:ID", NS)
         )
-
-        miktar = _safe_float(
-            _safe_text(line.find("cbc:InvoicedQuantity", NS), "0")
-        )
-
-        birim_fiyat = _safe_float(
-            _safe_text(line.find("cac:Price/cbc:PriceAmount", NS), "0")
-        )
-
+        miktar = _safe_float(_safe_text(line.find("cbc:InvoicedQuantity", NS), "0"))
+        birim_fiyat = _safe_float(_safe_text(line.find("cac:Price/cbc:PriceAmount", NS), "0"))
         kdv_orani = _safe_float(
             _safe_text(line.find("cac:TaxTotal/cac:TaxSubtotal/cbc:Percent", NS), "0")
         )
 
-        satir_toplam = _safe_float(
+        ara_toplam_satir = _safe_float(
             _safe_text(line.find("cbc:LineExtensionAmount", NS), "0")
         )
+        if ara_toplam_satir == 0 and miktar and birim_fiyat:
+            ara_toplam_satir = round(miktar * birim_fiyat, 2)
 
-        if satir_toplam == 0 and miktar and birim_fiyat:
-            satir_toplam = round(miktar * birim_fiyat, 2)
+        kdv_tutar = _safe_float(
+            _safe_text(line.find("cac:TaxTotal/cbc:TaxAmount", NS), "0")
+        )
+        if kdv_tutar == 0 and ara_toplam_satir:
+            kdv_tutar = round(ara_toplam_satir * kdv_orani / 100.0, 2)
+
+        satir_toplam = round(ara_toplam_satir + kdv_tutar, 2)
 
         kalemler.append({
             "stok_kod": stok_kod,
@@ -163,14 +162,22 @@ def parse_invoice_xml(xml_text: str) -> dict:
             "miktar": miktar,
             "birim_fiyat": birim_fiyat,
             "kdv_orani": kdv_orani,
+            "ara_toplam": ara_toplam_satir,
+            "kdv_tutar": kdv_tutar,
             "satir_toplam": satir_toplam
         })
 
-    if genel_toplam == 0:
-        if vergi_dahil_toplam > 0:
-            genel_toplam = vergi_dahil_toplam
+    if vergi_haric_toplam == 0:
+        vergi_haric_toplam = ara_toplam
+
+    if vergi_dahil_toplam == 0:
+        if genel_toplam > 0:
+            vergi_dahil_toplam = genel_toplam
         else:
-            genel_toplam = round(ara_toplam + kdv_toplam, 2)
+            vergi_dahil_toplam = round(vergi_haric_toplam + kdv_toplam, 2)
+
+    if genel_toplam == 0:
+        genel_toplam = vergi_dahil_toplam
 
     return {
         "fatura_no": fatura_no,

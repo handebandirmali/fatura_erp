@@ -15,10 +15,7 @@ cursor = conn.cursor()
 
 
 def _to_float(v, default=0.0):
-    """
-    pyodbc bazen Decimal döndürür, bazen None döndürür.
-    Güvenli float çevirme.
-    """
+
     if v is None:
         return float(default)
     if isinstance(v, Decimal):
@@ -31,7 +28,7 @@ def _to_float(v, default=0.0):
 
 def database_xml_guncelle():
     try:
-        # 2. Verileri Çek
+     
         query = """
         SELECT
             fatura_no,
@@ -49,7 +46,7 @@ def database_xml_guncelle():
         cursor.execute(query)
         rows = cursor.fetchall()
 
-        # UBL-TR Standart Namespaces
+        # UBL-TR Standart
         ns = {
             None: "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
             "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -62,7 +59,7 @@ def database_xml_guncelle():
         print(f"{len(rows)} adet satır işleniyor...")
 
         for row in rows:
-            # --- MALİ HESAPLAMALAR ---
+            
             f_no = row.fatura_no if row.fatura_no is not None else ""
             c_kod = row.cari_kod if row.cari_kod is not None else ""
             s_kod = row.stok_kod if row.stok_kod is not None else ""
@@ -95,18 +92,18 @@ def database_xml_guncelle():
             ET.SubElement(invoice, f"{{{CBC}}}InvoiceTypeCode").text = "SATIS"
             ET.SubElement(invoice, f"{{{CBC}}}DocumentCurrencyCode").text = "TRY"
 
-            # CUSTOMER
+            
             cust_party = ET.SubElement(invoice, f"{{{CAC}}}AccountingCustomerParty")
             party = ET.SubElement(cust_party, f"{{{CAC}}}Party")
 
-            # cari_kod XML içine yazılıyor
+            
             party_ident = ET.SubElement(party, f"{{{CAC}}}PartyIdentification")
             ET.SubElement(party_ident, f"{{{CBC}}}ID").text = str(c_kod)
 
             p_name = ET.SubElement(party, f"{{{CAC}}}PartyName")
             ET.SubElement(p_name, f"{{{CBC}}}Name").text = str(cari_ad)
 
-            # HEADER TAX
+           
             tax_total = ET.SubElement(invoice, f"{{{CAC}}}TaxTotal")
             ET.SubElement(tax_total, f"{{{CBC}}}TaxAmount", currencyID="TRY").text = str(kdv_tutari)
 
@@ -119,14 +116,14 @@ def database_xml_guncelle():
             tax_scheme = ET.SubElement(tax_category, f"{{{CAC}}}TaxScheme")
             ET.SubElement(tax_scheme, f"{{{CBC}}}Name").text = "KDV"
 
-            # TOTALS
+           
             legal_total = ET.SubElement(invoice, f"{{{CAC}}}LegalMonetaryTotal")
             ET.SubElement(legal_total, f"{{{CBC}}}LineExtensionAmount", currencyID="TRY").text = str(kdv_haric_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}TaxExclusiveAmount", currencyID="TRY").text = str(kdv_haric_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}TaxInclusiveAmount", currencyID="TRY").text = str(kdv_dahil_toplam)
             ET.SubElement(legal_total, f"{{{CBC}}}PayableAmount", currencyID="TRY").text = str(kdv_dahil_toplam)
 
-            # LINE
+            
             line = ET.SubElement(invoice, f"{{{CAC}}}InvoiceLine")
             ET.SubElement(line, f"{{{CBC}}}ID").text = "1"
 

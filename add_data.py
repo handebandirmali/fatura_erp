@@ -1,44 +1,105 @@
 import random
 from datetime import datetime, timedelta
+from collections import defaultdict
 
-# ====== CARİ VE ÜRÜN LİSTELERİ ======
+random.seed(42)
+
+# =========================================================
+# CARİ VE ÜRÜN LİSTELERİ
+# =========================================================
 cari_list = [
-    ("C001", "A TEMİZLİK"), ("C002", "B GIDA"), ("C003", "D OFİS SİSTEMLERİ"),
-    ("C004", "E TEKNOLOJİ"), ("C005", "G GIDA PAZARLAMA"), ("C006", "H TEMİZLİK ÜRÜNLERİ"),
-    ("C007", "J KIRTASİYE VE OFİS"), ("C008", "C TİCARET"), ("C009", "F KIRTASİYE"),
-    ("C010", "I OFİS MALZ."), ("C011", "KL KIRTASİYE"), ("C012", "MO OFİS"),
-    ("C013", "P TEMİZLİK"), ("C014", "U GIDA")
+    ("C001", "A TEMİZLİK"),
+    ("C002", "B GIDA"),
+    ("C003", "D OFİS SİSTEMLERİ"),
+    ("C004", "E TEKNOLOJİ"),
+    ("C005", "G GIDA PAZARLAMA"),
+    ("C006", "H TEMİZLİK ÜRÜNLERİ"),
+    ("C007", "J KIRTASİYE VE OFİS"),
+    ("C008", "C TİCARET"),
+    ("C009", "F KIRTASİYE"),
+    ("C010", "I OFİS MALZ."),
+    ("C011", "KL KIRTASİYE"),
+    ("C012", "MO OFİS"),
+    ("C013", "P TEMİZLİK"),
+    ("C014", "U GIDA"),
 ]
 
 urun_gruplari = {
-    "TEMİZLİK": ["Çamaşır Deterjanı", "Bulaşık Deterjanı", "Yüzey Temizleyici", "Sıvı Sabun", "Tuvalet Temizleyici"],
-    "GIDA": ["Makarna", "Pirinç", "Zeytinyağı", "Çay", "Kahve", "Un", "Şeker"],
-    "OFIS": ["Laptop", "Mouse", "Keyboard", "Monitor", "USB Flash", "Yazıcı"]
+    "TEMIZLIK": [
+        "Çamaşır Deterjanı",
+        "Bulaşık Deterjanı",
+        "Yüzey Temizleyici",
+        "Sıvı Sabun",
+        "Tuvalet Temizleyici",
+    ],
+    "GIDA": [
+        "Makarna",
+        "Pirinç",
+        "Zeytinyağı",
+        "Çay",
+        "Kahve",
+        "Un",
+        "Şeker",
+    ],
+    "OFIS": [
+        "Laptop",
+        "Mouse",
+        "Keyboard",
+        "Monitor",
+        "USB Flash",
+        "Yazıcı",
+    ],
 }
 
-# ====== SİSTEM HAFIZALARI ======
+# =========================================================
+# AYARLAR
+# =========================================================
+output_file = "fatura_veritabani.txt"
+min_gecmis_kayit = 4
+max_gecmis_kayit = 7
+min_baslangic_tarihi = datetime(2022, 1, 1).date()
+
+# YARIN AĞIRLIKLI DAĞILIM
+# hedef_gun -> profil sayısı
+gunluk_profil_hedefleri = {
+    1: 220,   # yarın çok yoğun
+    2: 110,
+    3: 90,
+    4: 70,
+    5: 60,
+    6: 50,
+    7: 40,
+    8: 30,
+    9: 25,
+    10: 20,
+}
+
+# =========================================================
+# HAFIZA
+# =========================================================
 stok_eslesme_tablosu = {}
-sabit_miktar_hafizasi = {}
 stok_sayaci = 1
 fatura_set = set()
-kdv_hafizasi = {}
-fiyat_hafizasi = {}
+baz_fiyat_hafizasi = {}
 yillik_fiyat_hafizasi = {}
-alis_tarih_hafizasi = {}
 cari_ad_hafizasi = {}
 
-# ====== AYARLAR ======
-hedef_kayit_sayisi = 6128
-output_file = "fatura_veritabani.txt"
+# =========================================================
+# YARDIMCILAR
+# =========================================================
+def sql_escape(value):
+    if value is None:
+        return ""
+    return str(value).replace("'", "''")
 
-# ====== YARDIMCI FONKSİYONLAR ======
-def get_unique_stok_kod(cari_kod, urun_adi):
+
+def get_unique_stok_kod(unique_key):
     global stok_sayaci
-    key = (cari_kod, urun_adi)
-    if key not in stok_eslesme_tablosu:
-        stok_eslesme_tablosu[key] = f"STK-{stok_sayaci:03}"
+    if unique_key not in stok_eslesme_tablosu:
+        stok_eslesme_tablosu[unique_key] = f"STK-{stok_sayaci:04d}"
         stok_sayaci += 1
-    return stok_eslesme_tablosu[key]
+    return stok_eslesme_tablosu[unique_key]
+
 
 def get_unique_fatura_no():
     while True:
@@ -47,79 +108,193 @@ def get_unique_fatura_no():
             fatura_set.add(fno)
             return fno
 
+
 def get_sektor_from_cari(cari_tam_ad):
-    sektor = "OFIS"
-    for anahtar in urun_gruplari.keys():
-        if anahtar in cari_tam_ad.upper():
-            sektor = anahtar
-            break
-    return sektor
+    ad = cari_tam_ad.upper()
+
+    if "GIDA" in ad:
+        return "GIDA"
+
+    if "TEMİZLİK" in ad or "TEMIZLIK" in ad:
+        return "TEMIZLIK"
+
+    if (
+        "OFİS" in ad
+        or "OFIS" in ad
+        or "KIRTASİYE" in ad
+        or "TEKNOLOJİ" in ad
+        or "TEKNOLOJI" in ad
+    ):
+        return "OFIS"
+
+    return "OFIS"
+
+
+def get_dynamic_quantity(base_miktar):
+    oran = random.uniform(0.92, 1.08)
+    return max(1, round(base_miktar * oran))
+
 
 def get_yearly_price(key, tarih_obj):
     yil = tarih_obj.year
     yil_key = (key, yil)
-    if key not in fiyat_hafizasi:
-        fiyat_hafizasi[key] = round(random.uniform(50, 1000), 2)
-    
-    base_fiyat = fiyat_hafizasi[key]
+
+    if key not in baz_fiyat_hafizasi:
+        baz_fiyat_hafizasi[key] = round(random.uniform(90, 3000), 2)
+
+    baz_fiyat = baz_fiyat_hafizasi[key]
+
     if yil_key not in yillik_fiyat_hafizasi:
-        yil_farki = yil - 2017
-        enflasyon_katsayi = 1.18 ** yil_farki 
-        fiyat = round(base_fiyat * enflasyon_katsayi, 2)
-        yillik_fiyat_hafizasi[yil_key] = fiyat
+        yil_farki = yil - 2022
+        enflasyon_katsayi = 1.18 ** max(0, yil_farki)
+        yillik_fiyat_hafizasi[yil_key] = round(baz_fiyat * enflasyon_katsayi, 2)
+
     return yillik_fiyat_hafizasi[yil_key]
 
-# ====== BAŞLANGIÇ TARİHLERİ VE KOMBİNASYONLAR ======
-kombinasyon_listesi = []
-for cari_k, cari_tam_ad in cari_list:
-    cari_ad_hafizasi[cari_k] = cari_tam_ad
-    sektor = get_sektor_from_cari(cari_tam_ad)
-    for urun in urun_gruplari[sektor]:
-        key = (cari_k, urun)
-        kombinasyon_listesi.append(key)
-        # Başlangıç tarihini geçmişe yayıyoruz (2017-2022 arası başlasınlar)
-        alis_tarih_hafizasi[key] = datetime(random.randint(2017, 2022), random.randint(1, 12), random.randint(1, 28))
 
-# ====== VERİ ÜRETİMİ (TAM 6128 KAYIT) ======
+# =========================================================
+# TÜM KOMBİNASYONLAR
+# =========================================================
+tum_kombinasyonlar = []
+
+for cari_kod, cari_ad in cari_list:
+    cari_ad_hafizasi[cari_kod] = cari_ad
+    sektor = get_sektor_from_cari(cari_ad)
+
+    for urun_adi in urun_gruplari[sektor]:
+        tum_kombinasyonlar.append((cari_kod, cari_ad, urun_adi))
+
+# =========================================================
+# PROFİL OLUŞTUR
+# =========================================================
+bugun = datetime.today().date()
+profiller = []
+profil_index = 1
+
+for hedef_gun, adet in gunluk_profil_hedefleri.items():
+    for _ in range(adet):
+        cari_kod, cari_ad, urun_adi = random.choice(tum_kombinasyonlar)
+
+        # Aynı cari+ürün çok tekrar etsin istemediğimiz için profile özel key
+        unique_profile_key = f"{cari_kod}|{urun_adi}|P{profil_index:04d}"
+        stok_kod = get_unique_stok_kod(unique_profile_key)
+
+        # periyotlar kısa/orta olsun ki yarın filtresinde daha çok kayıt geçsin
+        interval = random.choice([7, 10, 14, 15, 21, 30])
+        base_miktar = random.randint(5, 60)
+        kdv = random.choice([1, 8, 10, 18, 20])
+
+        # beklenecek tarih
+        beklenen_tarih = bugun + timedelta(days=hedef_gun)
+
+        # son gerçek alış tarihi
+        son_alis_tarihi = beklenen_tarih - timedelta(days=interval)
+
+        profiller.append({
+            "profil_no": profil_index,
+            "cari_kod": cari_kod,
+            "cari_ad": cari_ad,
+            "stok_kod": stok_kod,
+            "urun_adi": urun_adi,
+            "interval": interval,
+            "base_miktar": base_miktar,
+            "kdv": kdv,
+            "hedef_gun": hedef_gun,
+            "beklenen_tarih": beklenen_tarih,
+            "son_alis_tarihi": son_alis_tarihi,
+        })
+        profil_index += 1
+
+# =========================================================
+# GEÇMİŞ KAYITLARI ÜRET
+# =========================================================
 kayitlar = []
 
-while len(kayitlar) < hedef_kayit_sayisi:
-    # Rastgele bir cari-ürün çifti seç
-    key = random.choice(kombinasyon_listesi)
-    cari_k, urun = key
-    tarih_obj = alis_tarih_hafizasi[key]
-    
-    stok_k = get_unique_stok_kod(cari_k, urun)
-    fatura_n = get_unique_fatura_no()
-    
-    if key not in sabit_miktar_hafizasi:
-        sabit_miktar_hafizasi[key] = random.randint(1, 50)
-    
-    if key not in kdv_hafizasi:
-        kdv_hafizasi[key] = random.choice([1, 8, 10, 18, 20])
+for profil in profiller:
+    kayit_sayisi = random.randint(min_gecmis_kayit, max_gecmis_kayit)
+    interval = profil["interval"]
 
-    miktar = sabit_miktar_hafizasi[key]
-    kdv = kdv_hafizasi[key]
-    fiyat = get_yearly_price(key, tarih_obj)
-    tarih_str = tarih_obj.strftime("%Y-%m-%d")
+    # Hafif oynama var ama çok bozmuyor
+    jitter_options = [-1, 0, 1]
 
-    kayitlar.append((fatura_n, cari_k, cari_ad_hafizasi[cari_k], stok_k, urun, tarih_str, miktar, fiyat, kdv))
+    tarihler = [profil["son_alis_tarihi"]]
 
-    # --- AYNI GÜNÜ BOZAN VE SÜREKLİ İLERLEYEN TARİH ---
-    # Her işlemden sonra bu ürünün bir sonraki alış tarihini 15-40 gün sonraya atıyoruz
-    alis_tarih_hafizasi[key] = tarih_obj + timedelta(days=random.randint(15, 40))
+    while len(tarihler) < kayit_sayisi:
+        onceki = tarihler[0]
+        step = max(1, interval + random.choice(jitter_options))
+        yeni_tarih = onceki - timedelta(days=step)
 
-# Verileri karıştır (tarih sırasını bozmak için)
+        if yeni_tarih < min_baslangic_tarihi:
+            break
+
+        tarihler.insert(0, yeni_tarih)
+
+    # En az 3 kayıt kalsın
+    while len(tarihler) < 3:
+        ilk = tarihler[0]
+        yeni_tarih = ilk - timedelta(days=interval)
+        if yeni_tarih < min_baslangic_tarihi:
+            break
+        tarihler.insert(0, yeni_tarih)
+
+    for tarih in tarihler:
+        fatura_no = get_unique_fatura_no()
+        miktar = get_dynamic_quantity(profil["base_miktar"])
+        birim_fiyat = get_yearly_price(
+            (profil["cari_kod"], profil["stok_kod"], profil["urun_adi"]),
+            datetime.combine(tarih, datetime.min.time())
+        )
+
+        kayitlar.append({
+            "fatura_no": fatura_no,
+            "cari_kod": profil["cari_kod"],
+            "cari_ad": profil["cari_ad"],
+            "stok_kod": profil["stok_kod"],
+            "urun_adi": profil["urun_adi"],
+            "urun_tarihi": tarih,
+            "fiili_tarih": tarih,
+            "miktar": miktar,
+            "birim_fiyat": birim_fiyat,
+            "kdv_orani": profil["kdv"],
+        })
+
 random.shuffle(kayitlar)
 
-# ====== SQL YAZ ======
+# =========================================================
+# SQL DOSYASI YAZ
+# =========================================================
 with open(output_file, "w", encoding="utf-8") as f:
     for r in kayitlar:
         sql = (
-            f"INSERT INTO dbo.FaturaDetay (fatura_no, cari_kod, cari_ad, stok_kod, urun_adi, urun_tarihi, "
-            f"fiili_tarih, miktar, birim_fiyat, kdv_orani) VALUES "
-            f"('{r[0]}', '{r[1]}', '{r[2]}', '{r[3]}', '{r[4]}', '{r[5]}', '{r[5]}', {r[6]}, {r[7]}, {r[8]});\n"
+            "INSERT INTO dbo.FaturaDetay "
+            "(fatura_no, cari_kod, cari_ad, stok_kod, urun_adi, urun_tarihi, fiili_tarih, miktar, birim_fiyat, kdv_orani) "
+            "VALUES "
+            f"('{sql_escape(r['fatura_no'])}', "
+            f"'{sql_escape(r['cari_kod'])}', "
+            f"'{sql_escape(r['cari_ad'])}', "
+            f"'{sql_escape(r['stok_kod'])}', "
+            f"'{sql_escape(r['urun_adi'])}', "
+            f"'{r['urun_tarihi'].strftime('%Y-%m-%d')}', "
+            f"'{r['fiili_tarih'].strftime('%Y-%m-%d')}', "
+            f"{float(r['miktar'])}, "
+            f"{float(r['birim_fiyat'])}, "
+            f"{float(r['kdv_orani'])});\n"
         )
         f.write(sql)
 
-print(f"İşlem tamam, tam olarak {len(kayitlar)} kayıt üretildi.")
+# =========================================================
+# RAPOR
+# =========================================================
+ozet = defaultdict(int)
+for p in profiller:
+    ozet[p["hedef_gun"]] += 1
+
+print("=" * 60)
+print(f"Toplam profil sayısı              : {len(profiller)}")
+print(f"Toplam geçmiş kayıt sayısı        : {len(kayitlar)}")
+print(f"Oluşturulan SQL dosyası           : {output_file}")
+print("-" * 60)
+print("Beklenen gün dağılımı:")
+for gun in range(1, 11):
+    print(f"Gün +{gun}: {ozet[gun]} profil")
+print("=" * 60)

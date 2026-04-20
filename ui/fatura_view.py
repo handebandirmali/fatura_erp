@@ -10,23 +10,36 @@ from services.invoice_calc import update_invoice_xml
 from services.xml_engine import render_invoice_html
 from services.xml_reader import parse_invoice_xml
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            value = value.strip().replace(",", ".")
+            if value == "":
+                return default
+        return float(value)
+    except Exception:
+        return default
+
 
 def _load_invoices_from_xml() -> pd.DataFrame:
     conn = get_connection()
     try:
         query = """
         SELECT
-            ISNULL([fatura_no], 'NO-YOK') as [fatura_no_db],
-            ISNULL([cari_kod], '') as [cari_kod_db],
-            ISNULL([cari_ad], 'Bilinmeyen Firma') as [cari_ad_db],
-            ISNULL([stok_kod], '') as [stok_kod_db],
-            ISNULL([urun_adi], '') as [urun_adi_db],
+            ISNULL([fatura_no], 'NO-YOK') AS [fatura_no_db],
             [urun_tarihi],
-            ISNULL([miktar], 0) as [miktar_db],
-            ISNULL([birim_fiyat], 0) as [birim_fiyat_db],
-            ISNULL([kdv_orani], 0) as [kdv_orani_db],
-            ISNULL([Toplam], 0) as [Toplam_db],
-            CAST([xml_ubl] AS NVARCHAR(MAX)) as [xml_ubl]
+            CAST([xml_ubl] AS NVARCHAR(MAX)) AS [xml_ubl],
+            ISNULL([cari_kod], '') AS [cari_kod_db],
+            ISNULL([cari_ad], 'Bilinmeyen Firma') AS [cari_ad_db],
+            ISNULL([stok_kod], '') AS [stok_kod_db],
+            ISNULL([urun_adi], '') AS [urun_adi_db],
+            ISNULL([miktar], 0) AS [miktar_db],
+            ISNULL([birim_fiyat], 0) AS [birim_fiyat_db],
+            ISNULL([kdv_orani], 0) AS [kdv_orani_db],
+            ISNULL([Toplam], 0) AS [toplam_db]
         FROM [FaturaDB].[dbo].[FaturaDetay]
         ORDER BY urun_tarihi DESC
         """
@@ -41,15 +54,21 @@ def _load_invoices_from_xml() -> pd.DataFrame:
         xml_text = row_dict.get("xml_ubl")
 
         fallback_fatura_no = str(row_dict.get("fatura_no_db", "NO-YOK")).strip()
-        fallback_cari_kod = str(row_dict.get("cari_kod_db", "")).strip()
-        fallback_cari_ad = str(row_dict.get("cari_ad_db", "Bilinmeyen Firma")).strip()
-        fallback_stok_kod = str(row_dict.get("stok_kod_db", "")).strip()
-        fallback_urun_adi = str(row_dict.get("urun_adi_db", "")).strip()
         fallback_urun_tarihi = row_dict.get("urun_tarihi")
-        fallback_miktar = float(row_dict.get("miktar_db", 0) or 0)
-        fallback_birim_fiyat = float(row_dict.get("birim_fiyat_db", 0) or 0)
-        fallback_kdv_orani = float(row_dict.get("kdv_orani_db", 0) or 0)
-        fallback_toplam = float(row_dict.get("Toplam_db", 0) or 0)
+
+        fallback_row = {
+            "fatura_no": fallback_fatura_no,
+            "cari_kod": str(row_dict.get("cari_kod_db", "")).strip(),
+            "cari_ad": str(row_dict.get("cari_ad_db", "Bilinmeyen Firma")).strip(),
+            "stok_kod": str(row_dict.get("stok_kod_db", "")).strip(),
+            "urun_adi": str(row_dict.get("urun_adi_db", "")).strip(),
+            "urun_tarihi": fallback_urun_tarihi,
+            "miktar": _safe_float(row_dict.get("miktar_db", 0)),
+            "birim_fiyat": _safe_float(row_dict.get("birim_fiyat_db", 0)),
+            "kdv_orani": _safe_float(row_dict.get("kdv_orani_db", 0)),
+            "Toplam": _safe_float(row_dict.get("toplam_db", 0)),
+            "xml_ubl": xml_text,
+        }
 
         if xml_text and str(xml_text).strip():
             try:
@@ -57,66 +76,58 @@ def _load_invoices_from_xml() -> pd.DataFrame:
                 kalemler = parsed.get("kalemler", [])
 
                 if kalemler:
-                    for kalem in kalemler:
-                        miktar = float(kalem.get("miktar", 0) or 0)
-                        birim_fiyat = float(kalem.get("birim_fiyat", 0) or 0)
-                        kdv_orani = float(kalem.get("kdv_orani", 0) or 0)
+                    xml_fatura_no = str(parsed.get("fatura_no", "")).strip() or fallback_fatura_no
+                    xml_cari_kod = str(parsed.get("cari_kod", "")).strip() or fallback_row["cari_kod"]
+                    xml_cari_ad = str(parsed.get("firma_adi", "")).strip() or fallback_row["cari_ad"]
+                    xml_tarih = parsed.get("tarih") or fallback_urun_tarihi
 
-                        # XML içindeki satir_toplam net toplam olabilir, KDV dahil toplamı ekranda göstermek için tekrar hesaplıyoruz
-                        satir_toplam_kdv_dahil = round(
-                            miktar * birim_fiyat * (1 + kdv_orani / 100.0), 2
-                        )
+                    for kalem in kalemler:
+                        miktar = _safe_float(kalem.get("miktar", 0))
+                        birim_fiyat = _safe_float(kalem.get("birim_fiyat", 0))
+                        kdv_orani = _safe_float(kalem.get("kdv_orani", 0))
+
+                        satir_toplam = kalem.get("satir_toplam_kdv_dahil")
+                        if satir_toplam is None:
+                            satir_toplam = kalem.get("vergi_dahil_satir_toplam")
+                        if satir_toplam is None:
+                            satir_toplam = kalem.get("satir_toplam")
+
+                        satir_toplam = _safe_float(satir_toplam, 0.0)
 
                         normalized_rows.append({
-                            "fatura_no": str(parsed.get("fatura_no", "")).strip() or fallback_fatura_no,
-                            "cari_kod": str(parsed.get("cari_kod", "")).strip() or fallback_cari_kod,
-                            "cari_ad": str(parsed.get("firma_adi", "")).strip() or fallback_cari_ad,
-                            "stok_kod": str(kalem.get("stok_kod", "")).strip() or fallback_stok_kod,
-                            "urun_adi": str(kalem.get("urun_adi", "")).strip() or fallback_urun_adi,
-                            "urun_tarihi": pd.to_datetime(parsed.get("tarih", None), errors="coerce")
-                            if parsed.get("tarih") else fallback_urun_tarihi,
+                            "fatura_no": xml_fatura_no,
+                            "cari_kod": xml_cari_kod,
+                            "cari_ad": xml_cari_ad,
+                            "stok_kod": str(kalem.get("stok_kod", "")).strip() or fallback_row["stok_kod"],
+                            "urun_adi": str(kalem.get("urun_adi", "")).strip() or fallback_row["urun_adi"],
+                            "urun_tarihi": xml_tarih,
                             "miktar": miktar,
                             "birim_fiyat": birim_fiyat,
                             "kdv_orani": kdv_orani,
-                            "Toplam": satir_toplam_kdv_dahil,
-                            "xml_ubl": xml_text
+                            "Toplam": satir_toplam,
+                            "xml_ubl": xml_text,
                         })
                     continue
-
             except Exception:
                 pass
 
-        normalized_rows.append({
-            "fatura_no": fallback_fatura_no,
-            "cari_kod": fallback_cari_kod,
-            "cari_ad": fallback_cari_ad,
-            "stok_kod": fallback_stok_kod,
-            "urun_adi": fallback_urun_adi,
-            "urun_tarihi": fallback_urun_tarihi,
-            "miktar": fallback_miktar,
-            "birim_fiyat": fallback_birim_fiyat,
-            "kdv_orani": fallback_kdv_orani,
-            "Toplam": fallback_toplam,
-            "xml_ubl": xml_text
-        })
+        normalized_rows.append(fallback_row)
 
     df = pd.DataFrame(normalized_rows)
 
     if not df.empty:
-        if "fatura_no" in df.columns:
-            df["fatura_no"] = df["fatura_no"].astype(str).str.strip()
-
-        if "cari_kod" in df.columns:
-            df["cari_kod"] = df["cari_kod"].astype(str).str.strip()
-
-        if "stok_kod" in df.columns:
-            df["stok_kod"] = df["stok_kod"].astype(str).str.strip()
-
-        if "urun_adi" in df.columns:
-            df["urun_adi"] = df["urun_adi"].astype(str).str.strip()
+        text_columns = ["fatura_no", "cari_kod", "cari_ad", "stok_kod", "urun_adi"]
+        for col in text_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
 
         if "urun_tarihi" in df.columns:
             df["urun_tarihi"] = pd.to_datetime(df["urun_tarihi"], errors="coerce")
+
+        numeric_columns = ["miktar", "birim_fiyat", "kdv_orani", "Toplam"]
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     return df
 
@@ -142,6 +153,7 @@ def render_fatura_page():
     event = st.dataframe(
         subset.drop(columns=["xml_ubl"], errors="ignore"),
         use_container_width=True,
+        width="stretch",
         hide_index=True,
         selection_mode="single-row",
         on_select="rerun",
@@ -230,11 +242,38 @@ def render_fatura_page():
                         cur = conn.cursor()
 
                         for u in updates:
-                            cur.execute("""
+                            cari_kod = u[0]
+                            cari_ad = u[1]
+                            urun_adi = u[2]
+                            miktar = _safe_float(u[3])
+                            birim_fiyat = _safe_float(u[4])
+                            kdv_orani = _safe_float(u[5])
+                            urun_tarihi = u[6]
+                            fatura_no = u[7]
+                            stok_kod = u[8] if len(u) > 8 else ""
+
+                            satir_toplam = round(miktar * birim_fiyat * (1 + (kdv_orani / 100.0)), 2)
+
+                            cur.execute(
+                                """
                                 UPDATE FaturaDetay
-                                SET cari_kod=?, cari_ad=?, urun_adi=?, miktar=?, birim_fiyat=?, kdv_orani=?, urun_tarihi=?
+                                SET cari_kod=?, cari_ad=?, urun_adi=?, miktar=?, birim_fiyat=?,
+                                    kdv_orani=?, urun_tarihi=?, Toplam=?
                                 WHERE fatura_no=? AND stok_kod=?
-                            """, u)
+                                """,
+                                (
+                                    cari_kod,
+                                    cari_ad,
+                                    urun_adi,
+                                    miktar,
+                                    birim_fiyat,
+                                    kdv_orani,
+                                    urun_tarihi,
+                                    satir_toplam,
+                                    fatura_no,
+                                    stok_kod,
+                                )
+                            )
 
                         old_xml = edit_df.iloc[0]["xml_ubl"]
                         if old_xml and str(old_xml).strip() != "":
@@ -250,6 +289,7 @@ def render_fatura_page():
                         conn.commit()
                         st.success("✅ Başarıyla Güncellendi!")
                         st.session_state.edit_mode = False
+                        _load_invoices_from_xml.clear()
                         st.rerun()
 
                     except Exception as e:
@@ -258,7 +298,7 @@ def render_fatura_page():
                     finally:
                         conn.close()
 
-    render_ai_widget(subset)
+    render_ai_widget()
 
 
 def render_irsaliye_page():

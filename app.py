@@ -25,7 +25,7 @@ with st.sidebar:
     
     selected_module = st.radio(
         "Modül Seçiniz:", 
-        ["📄 E-Fatura", "🚚 E-İrsaliye", "📤 Yükleme", "🔮 Tahmin", "🤖 Akıllı Fatura İşleme"],
+        ["📄 E-Fatura", "🚚 E-İrsaliye", "📤 Yükleme", "🔮 Tahmin", "✨ Akıllı Fatura İşleme"],
         index=0
     )
 
@@ -38,5 +38,5 @@ elif selected_module == "📤 Yükleme":
     render_fatura_yukleme_page()
 elif selected_module == "🔮 Tahmin":
     render_tahmin_page()
-elif selected_module == "🤖 Akıllı Fatura İşleme":
+elif selected_module == "✨ Akıllı Fatura İşleme":
     render_akilli_fatura_isleme_page()

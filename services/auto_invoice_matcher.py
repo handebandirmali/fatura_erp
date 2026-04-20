@@ -43,7 +43,7 @@ class AutoInvoiceMatcher:
     FIELD_APPLY_THRESHOLD = 70.0
     PRICE_WARNING_PERCENT = 15.0
 
-    def load_history_from_db(self) -> pd.DataFrame:
+    def load_history_from_db(self, exclude_invoice_no: str = "") -> pd.DataFrame:
         conn = get_connection()
         try:
             query = f"""
@@ -60,10 +60,18 @@ class AutoInvoiceMatcher:
                 kdv_orani,
                 toplam
             FROM {self.SOURCE_TABLE}
-            WHERE ISNULL(LTRIM(RTRIM(cari_ad)), '') <> ''
-               OR ISNULL(LTRIM(RTRIM(urun_adi)), '') <> ''
+            WHERE (
+                ISNULL(LTRIM(RTRIM(cari_ad)), '') <> ''
+                OR ISNULL(LTRIM(RTRIM(urun_adi)), '') <> ''
+            )
             """
-            df = pd.read_sql(query, conn)
+
+            params = []
+            if exclude_invoice_no and str(exclude_invoice_no).strip():
+                query += " AND ISNULL(LTRIM(RTRIM(fatura_no)), '') <> ?"
+                params.append(str(exclude_invoice_no).strip())
+
+            df = pd.read_sql(query, conn, params=params)
         finally:
             conn.close()
 
@@ -160,7 +168,6 @@ class AutoInvoiceMatcher:
                 "ortalama_fiyat": 0.0
             }
 
-        # Önce aynı firmadaki geçmiş ürünleri kullan
         if firma_adi:
             firma_df = product_df[
                 product_df["cari_ad"].astype(str).str.lower() == str(firma_adi).strip().lower()
@@ -289,7 +296,8 @@ class AutoInvoiceMatcher:
         return decision, reasons, warnings
 
     def suggest_invoice(self, parsed_invoice: dict) -> dict:
-        history_df = self.load_history_from_db()
+        exclude_invoice_no = str(parsed_invoice.get("exclude_invoice_no", "")).strip()
+        history_df = self.load_history_from_db(exclude_invoice_no=exclude_invoice_no)
 
         empty_result = {
             "firma_adi": parsed_invoice.get("firma_adi", ""),

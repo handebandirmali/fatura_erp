@@ -1,0 +1,22 @@
+{
+  "received_at": "2026-04-17 10:03:19",
+  "status": "ALINDI",
+  "source": "fatura_erp_prediction",
+  "payload": {
+    "fatura_no": "FT-646464",
+    "cari_kod": "C-001",
+    "firma_adi": "HANDE",
+    "tarih": "",
+    "kalemler": [
+      {
+        "stok_kod": "STK-064",
+        "urun_adi": "KUPE",
+        "miktar": 26.0,
+        "birim_fiyat": 364.64,
+        "kdv_orani": 20.0
+      }
+    ],
+    "ara_toplam": 9480.64,
+    "genel_toplam": 11376.767999999998
+  }
+}

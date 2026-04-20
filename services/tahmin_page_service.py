@@ -5,6 +5,7 @@ from services.xml_reader import parse_invoice_xml
 
 class TahminPageService:
     TABLE_NAME = "[FaturaDB].[dbo].[FaturaTahminleri]"
+    REAL_TABLE = "[FaturaDB].[dbo].[FaturaDetay]"
 
     def get_predictions(self) -> pd.DataFrame:
         conn = get_connection()
@@ -72,6 +73,8 @@ class TahminPageService:
                 "tahmin_notu": str(row_dict.get("tahmin_notu", "") or ""),
             }
 
+            # Tablo/listede XML varsa yine normalize edebilirsin.
+            # Ama önizleme tarafında XML kullanmayacağız.
             if xml_text and str(xml_text).strip():
                 try:
                     parsed = parse_invoice_xml(xml_text)
@@ -94,7 +97,6 @@ class TahminPageService:
                             new_row["Toplam"] = round(miktar * birim_fiyat * (1 + kdv_orani / 100.0), 2)
                             normalized_rows.append(new_row)
                         continue
-
                 except Exception:
                     pass
 
@@ -116,6 +118,54 @@ class TahminPageService:
             result_df["urun_adi"] = result_df["urun_adi"].astype(str).str.strip()
 
         return result_df
+
+    def get_prediction_rows_by_no(self, tahmin_no: str) -> pd.DataFrame:
+        tahmin_no = str(tahmin_no).strip()
+        df = self.get_predictions()
+        if df.empty:
+            return pd.DataFrame()
+        return df[df["tahmin_no"].astype(str).str.strip() == tahmin_no].copy()
+
+    def get_reference_invoice_rows(self, referans_fatura_no: str) -> pd.DataFrame:
+        referans_fatura_no = str(referans_fatura_no or "").strip()
+        if not referans_fatura_no:
+            return pd.DataFrame()
+
+        conn = get_connection()
+        try:
+            query = f"""
+            SELECT
+                ISNULL(CAST([fatura_no] AS NVARCHAR(255)), '') AS [fatura_no],
+                ISNULL(CAST([cari_kod] AS NVARCHAR(255)), '') AS [cari_kod],
+                ISNULL(CAST([cari_ad] AS NVARCHAR(255)), '') AS [cari_ad],
+                ISNULL(CAST([stok_kod] AS NVARCHAR(255)), '') AS [stok_kod],
+                ISNULL(CAST([urun_adi] AS NVARCHAR(255)), '') AS [urun_adi],
+                [urun_tarihi],
+                [fiili_tarih],
+                ISNULL([miktar], 0) AS [miktar],
+                ISNULL([birim_fiyat], 0) AS [birim_fiyat],
+                ISNULL([kdv_orani], 0) AS [kdv_orani],
+                ISNULL([Toplam], 0) AS [Toplam]
+            FROM {self.REAL_TABLE}
+            WHERE LTRIM(RTRIM(CAST([fatura_no] AS NVARCHAR(255)))) = ?
+            ORDER BY [stok_kod], [urun_adi]
+            """
+            df = pd.read_sql(query, conn, params=[referans_fatura_no])
+        finally:
+            conn.close()
+
+        if df.empty:
+            return df
+
+        for col in ["fatura_no", "cari_kod", "cari_ad", "stok_kod", "urun_adi"]:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+
+        for col in ["miktar", "birim_fiyat", "kdv_orani", "Toplam"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+        return df
 
     def update_prediction_rows(
         self,

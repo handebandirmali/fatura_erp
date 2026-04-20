@@ -41,7 +41,7 @@ class StreamlitHandler(BaseCallbackHandler):
         self.placeholder.markdown(bubble_html, unsafe_allow_html=True)
 
 
-def run_ai(prompt: str, subset_df, chat_history, placeholder):
+def run_ai(prompt: str , chat_history, placeholder):
 
     context = ToolContext(
         user_id="u1",

@@ -20,24 +20,22 @@ def render_sidebar():
     with col_urun:
         urun_filter = st.text_input("Ürün Adı", key=f"f_urun_{v}")
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 1, 1.1, 1.25, 1.25, 1.25, 1.25])
+    c1, c2, c3, c4, c5, c6 = st.columns([1, 1, 1.25, 1.25, 1.25, 1.25])
 
     with c1:
         kdv_filter = st.text_input("KDV %", key=f"f_kdv_{v}")
     with c2:
         miktar_filter = st.text_input("Miktar", key=f"f_miktar_{v}")
     with c3:
-        use_date_filter = st.checkbox("Tarih filtresi", value=False, key=f"f_use_date_{v}")
+        tarih_bas = st.date_input("Başlangıç Tarihi", value=date(2023, 1, 1), key=f"f_t_bas_{v}")
     with c4:
-        tarih_bas = st.date_input("Başlangıç Tarihi", value=date(2023, 1, 1), key=f"f_t_bas_{v}", disabled=not use_date_filter)
+        tarih_bit = st.date_input("Bitiş Tarihi", value=date.today(), key=f"f_t_bit_{v}")
     with c5:
-        tarih_bit = st.date_input("Bitiş Tarihi", value=date(2100, 12, 31), key=f"f_t_bit_{v}", disabled=not use_date_filter)
-    with c6:
         fiyat_min = st.number_input("Min Fiyat", value=0.0, step=0.01, key=f"f_p_min_{v}")
-    with c7:
+    with c6:
         fiyat_max = st.number_input("Max Fiyat", value=1000000.0, step=0.01, key=f"f_p_max_{v}")
 
-    _, _, _, _, _, _, btn_col = st.columns([1, 1, 1.1, 1.25, 1.25, 1.25, 1.25])
+    _, _, _, _, _, btn_col = st.columns([1, 1, 1.25, 1.25, 1.25, 1.25])
     with btn_col:
         if st.button("🔄 Sıfırla", use_container_width=True):
             st.session_state.filter_version += 1
@@ -53,7 +51,7 @@ def render_sidebar():
         "stok_filter": stok_filter,
         "cari_ad_filter": cari_ad_filter,
         "urun_filter": urun_filter,
-        "use_date_filter": use_date_filter,
+        "use_date_filter": True,
         "tarih_bas": tarih_bas,
         "tarih_bit": tarih_bit,
         "miktar_filter": miktar_filter,

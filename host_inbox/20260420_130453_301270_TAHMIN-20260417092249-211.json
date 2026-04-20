@@ -1,0 +1,22 @@
+{
+  "received_at": "2026-04-20 13:04:53",
+  "status": "ALINDI",
+  "source": "fatura_erp_prediction",
+  "payload": {
+    "fatura_no": "TAHMIN-20260417092249-211",
+    "cari_kod": "C005",
+    "firma_adi": "G GIDA PAZARLAMA",
+    "tarih": "2026-04-18",
+    "kalemler": [
+      {
+        "stok_kod": "STK-0165",
+        "urun_adi": "Un",
+        "miktar": 49.0,
+        "birim_fiyat": 5241.54,
+        "kdv_orani": 8.0
+      }
+    ],
+    "ara_toplam": 256835.46,
+    "genel_toplam": 277382.2968
+  }
+}

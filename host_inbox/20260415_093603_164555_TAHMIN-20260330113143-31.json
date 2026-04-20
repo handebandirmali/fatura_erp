@@ -1,0 +1,22 @@
+{
+  "received_at": "2026-04-15 09:36:03",
+  "status": "ALINDI",
+  "source": "fatura_erp_prediction",
+  "payload": {
+    "fatura_no": "TAHMIN-20260330113143-31",
+    "cari_kod": "C003",
+    "firma_adi": "D OFİS SİSTEMLERİ",
+    "tarih": "2026-03-31",
+    "kalemler": [
+      {
+        "stok_kod": "STK-0195",
+        "urun_adi": "Mouse",
+        "miktar": 58.0,
+        "birim_fiyat": 3278.84,
+        "kdv_orani": 10.0
+      }
+    ],
+    "ara_toplam": 190172.72,
+    "genel_toplam": 209189.99200000003
+  }
+}

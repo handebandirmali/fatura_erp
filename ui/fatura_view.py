@@ -299,9 +299,4 @@ def render_fatura_page():
                         conn.close()
 
     render_ai_widget()
-
-
-def render_irsaliye_page():
-    st.title("🚚 E-İrsaliye Yönetimi")
-    st.info("🚧 Bu modül şu anda geliştirme aşamasındadır.")
-    st.markdown("### Planlanan Özellikler:\n- İrsaliye listeleme\n- Depo stok kontrolü\n- İrsaliye -> Fatura dönüşümü")
+    

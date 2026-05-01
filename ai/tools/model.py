@@ -1,9 +1,4 @@
-"""
-Tool execution modelleri.
 
-Bu dosya, agent icindeki tool'larin
-calisma formatini standartlastirir.
-"""
 
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field

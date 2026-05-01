@@ -1,5 +1,6 @@
-from __future__ import annotations
 
+from __future__ import annotations
+from ai.tools.db_tool import generate_ubl_xml_content
 import json
 import os
 from datetime import datetime
@@ -8,6 +9,14 @@ from typing import Any, Dict, List
 
 import pyodbc
 from flask import Flask, jsonify, request
+
+# XML üretici
+try:
+    from ai.tools.db_tool import generate_ubl_xml_content
+    XML_ENABLED = True
+except ImportError:
+    XML_ENABLED = False
+    print("[WARN] generate_ubl_xml_content import edilemedi, xml_ubl None kaydedilecek.")
 
 app = Flask(__name__)
 
@@ -158,6 +167,25 @@ def save_to_host_table(data: Dict[str, Any]) -> int:
         conn.close()
 
 
+def _generate_xml(fatura_no: str, cari_kod: str, firma_adi: str,
+                  tarih: Any, kalemler: list) -> str | None:
+    """Tüm kalemler için tek bir UBL XML üretir."""
+    if not XML_ENABLED:
+        return None
+    try:
+        tarih_str = str(tarih)[:10] if tarih else datetime.now().strftime("%Y-%m-%d")
+        xml_data = {
+            "fatura_no": fatura_no,
+            "cari_kod":  cari_kod,
+            "firma_adi": firma_adi,
+            "kalemler":  kalemler,
+        }
+        return generate_ubl_xml_content(xml_data, tarih_str)
+    except Exception as e:
+        print(f"[XML] Oluşturma hatası: {e}")
+        return None
+
+
 def transfer_host_record_to_fatura_detay(host_id: int) -> int:
     conn = get_db_connection()
     try:
@@ -182,10 +210,10 @@ def transfer_host_record_to_fatura_detay(host_id: int) -> int:
         data = json.loads(payload_json)
 
         fatura_no = str(data.get("fatura_no", "")).strip()
-        cari_kod = str(data.get("cari_kod", "")).strip()
+        cari_kod  = str(data.get("cari_kod", "")).strip()
         firma_adi = str(data.get("firma_adi", "")).strip()
-        tarih = data.get("tarih")
-        kalemler = data.get("kalemler", [])
+        tarih     = data.get("tarih")
+        kalemler  = data.get("kalemler", [])
 
         if not fatura_no:
             raise ValueError("fatura_no boş olamaz.")
@@ -193,18 +221,20 @@ def transfer_host_record_to_fatura_detay(host_id: int) -> int:
         if not kalemler:
             raise ValueError("Aktarılacak kalem bulunamadı.")
 
+        # Tüm kalemler için tek XML oluştur
+        generated_xml = _generate_xml(fatura_no, cari_kod, firma_adi, tarih, kalemler)
+
         inserted_count = 0
 
         for kalem in kalemler:
-            stok_kod = str(kalem.get("stok_kod", "")).strip()
-            urun_adi = str(kalem.get("urun_adi", "")).strip()
-            miktar = float(kalem.get("miktar", 0) or 0)
+            stok_kod    = str(kalem.get("stok_kod", "")).strip()
+            urun_adi    = str(kalem.get("urun_adi", "")).strip()
+            miktar      = float(kalem.get("miktar", 0) or 0)
             birim_fiyat = float(kalem.get("birim_fiyat", 0) or 0)
-            kdv_orani = float(kalem.get("kdv_orani", 0) or 0)
+            kdv_orani   = float(kalem.get("kdv_orani", 0) or 0)
+            toplam      = round(miktar * birim_fiyat * (1 + kdv_orani / 100.0), 2)
 
-            toplam = round(miktar * birim_fiyat * (1 + kdv_orani / 100.0), 2)
-
-            # aynı fatura_no + stok_kod + urun_adi daha önce aktarılmış mı kontrolü
+            # Aynı kayıt daha önce aktarılmış mı?
             cur.execute(f"""
                 SELECT COUNT(*)
                 FROM {REAL_TABLE}
@@ -212,11 +242,7 @@ def transfer_host_record_to_fatura_detay(host_id: int) -> int:
                     ISNULL(LTRIM(RTRIM(CAST(fatura_no AS NVARCHAR(255)))), '') = ?
                     AND ISNULL(LTRIM(RTRIM(CAST(stok_kod AS NVARCHAR(255)))), '') = ?
                     AND ISNULL(LTRIM(RTRIM(CAST(urun_adi AS NVARCHAR(255)))), '') = ?
-            """, (
-                fatura_no,
-                stok_kod,
-                urun_adi,
-            ))
+            """, (fatura_no, stok_kod, urun_adi))
             existing_count = cur.fetchone()[0]
 
             if existing_count > 0:
@@ -250,7 +276,7 @@ def transfer_host_record_to_fatura_detay(host_id: int) -> int:
                 birim_fiyat,
                 kdv_orani,
                 toplam,
-                None
+                generated_xml,
             ))
 
             inserted_count += 1
@@ -347,7 +373,6 @@ def receive_prediction():
 
 @app.route("/api/tahmin/aktar/<int:host_id>", methods=["POST"])
 def transfer_prediction_to_real_invoice(host_id: int):
-   
     try:
         inserted_count = transfer_host_record_to_fatura_detay(host_id)
 

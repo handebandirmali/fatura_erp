@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-# 1. Veritabanı Bağlantı Bilgileri
+# 1. Veritabanı Bağlantı Bilgileri Hande
 conn = pyodbc.connect(
     "DRIVER={ODBC Driver 17 for SQL Server};"
     "SERVER=.;"

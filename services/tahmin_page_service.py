@@ -73,8 +73,7 @@ class TahminPageService:
                 "tahmin_notu": str(row_dict.get("tahmin_notu", "") or ""),
             }
 
-            # Tablo/listede XML varsa yine normalize edebilirsin.
-            # Ama önizleme tarafında XML kullanmayacağız.
+
             if xml_text and str(xml_text).strip():
                 try:
                     parsed = parse_invoice_xml(xml_text)

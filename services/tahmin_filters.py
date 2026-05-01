@@ -25,7 +25,6 @@ def apply_tahmin_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if "durum" in subset.columns:
         subset["durum"] = subset["durum"].astype(str).str.strip()
 
-    # Metin filtreleri
     if filters.get("tahmin_no"):
         subset = subset[
             subset["tahmin_no"].astype(str).str.contains(
@@ -77,7 +76,7 @@ def apply_tahmin_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         except Exception:
             pass
 
-    # Tarih filtresi
+
     if "beklenen_tarih" in subset.columns and filters.get("tarih_bas") and filters.get("tarih_bit"):
         tarih_series = pd.to_datetime(subset["beklenen_tarih"], errors="coerce")
         mask_tarih = tarih_series.isna() | (
@@ -86,7 +85,7 @@ def apply_tahmin_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         )
         subset = subset[mask_tarih]
 
-    # Fiyat filtresi
+
     if "birim_fiyat" in subset.columns:
         fiyat_series = pd.to_numeric(subset["birim_fiyat"], errors="coerce")
         mask_fiyat = fiyat_series.isna() | (

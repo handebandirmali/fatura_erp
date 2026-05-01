@@ -1,0 +1,2 @@
+{"timestamp": "2026-04-21 17:38:30", "level": "INFO", "message": "Tahmin payload başarıyla alındı ve host tablosuna kaydedildi.", "extra": {"fatura_no": "TAHMIN-20260417092249-49", "cari_kod": "C002", "file": "C:\\Users\\Hande\\Desktop\\E-FATURA\\fatura_erp\\host_inbox\\20260421_173829_897309_TAHMIN-20260417092249-49.json", "host_id": 14}}
+{"timestamp": "2026-04-21 17:38:36", "level": "INFO", "message": "Host kaydı gerçek faturaya aktarıldı.", "extra": {"host_id": 14, "inserted_count": 1}}

@@ -7,7 +7,6 @@ def get_preview_html(xml_string):
         xml_data = xml_string.strip().encode("utf-8")
         tree = ET.fromstring(xml_data)
         
-        # XSLT Tasarımı (Değişmedi)
         xslt_str = """<?xml version="1.0" encoding="UTF-8"?>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"

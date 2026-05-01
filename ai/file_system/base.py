@@ -1,8 +1,3 @@
-"""
-File system capability interface.
-
-This module contains the abstract base class for file system operations.
-"""
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Optional

@@ -11,7 +11,6 @@ class ExpectedInvoiceService:
     MAX_PERIOD_DAYS = 45
     MAX_STD_DAYS = 12
 
-    # Önümüzdeki kaç günlük tahminler üretilsin
     PREDICTION_WINDOW_DAYS = 30
 
     def _safe_str(self, value) -> str:

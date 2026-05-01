@@ -6,3 +6,4 @@ langchain-community
 langchain-ollama
 streamlit-float
 lxml
+pymupdf

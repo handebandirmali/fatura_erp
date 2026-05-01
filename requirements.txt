@@ -1,3 +1,5 @@
+langchain-community
+langchain
+pyodbc
 streamlit
 pandas
-pyodbc

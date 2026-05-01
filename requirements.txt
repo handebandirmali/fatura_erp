@@ -3,3 +3,4 @@ langchain
 pyodbc
 streamlit
 pandas
+langchain-ollama
